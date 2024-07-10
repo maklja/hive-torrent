@@ -44,6 +44,11 @@ defmodule HiveTorrent.Bencode.ParserTest do
     assert result == {:error, %SyntaxError{message: "Unexpected token '.2e' while parsing"}}
   end
 
+  test "parse integer without closing token" do
+    result = "i12" |> IO.iodata_to_binary() |> Parser.parse()
+    assert result == {:error, %SyntaxError{message: "Unexpected end of the input"}}
+  end
+
   ## Integer tests parse with exception
 
   test "parse! positive integer" do
@@ -81,6 +86,11 @@ defmodule HiveTorrent.Bencode.ParserTest do
   test "parse! float" do
     result = catch_error("i1.2e" |> IO.iodata_to_binary() |> Parser.parse!())
     assert result == %SyntaxError{message: "Unexpected token '.2e' while parsing"}
+  end
+
+  test "parse! integer without closing token" do
+    result = catch_error("i12" |> IO.iodata_to_binary() |> Parser.parse!())
+    assert result == %SyntaxError{message: "Unexpected end of the input"}
   end
 
   ## String tests parse with tuple

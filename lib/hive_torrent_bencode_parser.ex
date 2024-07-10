@@ -20,7 +20,12 @@ end
 
 defmodule HiveTorrent.Bencode.Parser do
   @moduledoc """
-  Documentation for `HiveTorrentApplication`.
+  Parser for Bencode format.
+
+  Reference:
+
+  - http://www.bittorrent.org/beps/bep_0003.html#bencoding
+  - https://en.wikipedia.org/wiki/Bencode
   """
 
   require Logger
@@ -30,6 +35,18 @@ defmodule HiveTorrent.Bencode.Parser do
   @type t :: integer() | String.t() | list() | map()
   @type parse_err :: SyntaxError.t()
 
+  @doc """
+  Tries to parse Bencode format into Elixir type integer, string, list or map.
+
+  Returns {:ok, result}, otherwise {:error, %HiveTorrent.Bencode.SyntaxError{message}}
+
+  ## Examples
+      iex> "i30e" |> IO.iodata_to_binary() |> HiveTorrent.Bencode.Parser.parse()
+      {:ok, 30}
+
+      iex> "i30" |> IO.iodata_to_binary() |> HiveTorrent.Bencode.Parser.parse()
+      {:error, %HiveTorrent.Bencode.SyntaxError{message: "Unexpected end of the input"}}
+  """
   @spec parse(iodata()) :: {:ok, t()} | {:error, parse_err()}
   def parse(bencode_data) when is_binary(bencode_data) do
     {value, rest} = parse_value(bencode_data)
@@ -42,6 +59,9 @@ defmodule HiveTorrent.Bencode.Parser do
     {:syntax_error, invalid_token} -> {:error, SyntaxError.exception(invalid_token)}
   end
 
+  @doc """
+  Same as parse/1, but raises a HiveTorrent.Bencode.SyntaxError exception in case of failure. Otherwise return a value.
+  """
   @spec parse!(iodata()) :: t() | no_return()
   def parse!(bencode_data) when is_binary(bencode_data) do
     case parse(bencode_data) do
@@ -108,8 +128,11 @@ defmodule HiveTorrent.Bencode.Parser do
   defp continue_parse_integer(<<digit>> <> rest, acc) when digit in ~c"0123456789",
     do: continue_parse_integer(rest, [digit | acc])
 
+  defp continue_parse_integer("", _acc),
+    do: syntax_error(:eof)
+
   defp continue_parse_integer(other, _acc),
-    do: {:error, other}
+    do: syntax_error(other)
 
   ## String
 

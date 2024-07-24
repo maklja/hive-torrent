@@ -13,6 +13,17 @@ defmodule HiveTorrent.Bencode.SerializeError do
   def message(%{message: message}), do: message
 end
 
+defmodule HiveTorrent.Bencode.Serializer do
+  alias HiveTorrent.Bencode.SerializerProtocol
+
+  @type serializable :: SerializerProtocol.serializable()
+
+  @spec encode(serializable()) :: binary() | no_return()
+  def encode(value) do
+    value |> SerializerProtocol.encode() |> IO.iodata_to_binary()
+  end
+end
+
 defprotocol HiveTorrent.Bencode.SerializerProtocol do
   @fallback_to_any true
 

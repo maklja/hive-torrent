@@ -7,6 +7,7 @@ defmodule HiveTorrent.Bencode.SerializerTest do
   doctest HiveTorrent.Bencode.Serializer
 
   alias HiveTorrent.Bencode.Serializer
+  alias HiveTorrent.Bencode.SerializeError
   alias HiveTorrent.Bencode.SerializerExampleStruct
 
   ## Integer tests
@@ -82,15 +83,33 @@ defmodule HiveTorrent.Bencode.SerializerTest do
   end
 
   test "serialize map of maps" do
-    assert Serializer.encode(%{"test" => %{"test" => 999}}) == "d4:testd4:testi999eee"
+    assert Serializer.encode(%{"test" => %{test: 999}}) == "d4:testd4:testi999eee"
+  end
+
+  test "serialize map ensure keys are sorted" do
+    assert Serializer.encode(%{"c" => 1, "a" => 2}) == "d1:ai2e1:ci1ee"
   end
 
   ## map struct
 
   test "serialize SerializerExampleStruct" do
-    IO.inspect(Map.from_struct(%SerializerExampleStruct{message: "test", value: 100}))
-
     assert Serializer.encode(%SerializerExampleStruct{message: "test", value: 100}) ==
              "d7:message4:test5:valuei100ee"
+  end
+
+  test "serialize unsupported float type" do
+    error = catch_error(Serializer.encode(1.1))
+    assert error == %SerializeError{value: 1.1, message: "Unsupported types: Float"}
+  end
+
+  test "serialize unsupported tuple type" do
+    error = catch_error(Serializer.encode({13, "test"}))
+    assert error == %SerializeError{value: {13, "test"}, message: "Unsupported types: Tuple"}
+  end
+
+  test "serialize unsupported function type" do
+    func = fn x -> IO.inspect(x) end
+    error = catch_error(Serializer.encode(func))
+    assert error == %SerializeError{value: func, message: "Unsupported types: Function"}
   end
 end

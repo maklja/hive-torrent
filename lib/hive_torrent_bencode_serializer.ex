@@ -62,11 +62,18 @@ defimpl HiveTorrent.Bencode.SerializerProtocol, for: Map do
       map
       |> Map.keys()
       |> Enum.sort()
-      |> Enum.map(fn key ->
-        [
-          SerializerProtocol.BitString.encode(key),
-          SerializerProtocol.encode(Map.get(map, key))
-        ]
+      |> Enum.map(fn
+        key when is_bitstring(key) ->
+          [
+            SerializerProtocol.BitString.encode(key),
+            SerializerProtocol.encode(Map.get(map, key))
+          ]
+
+        key when is_atom(key) ->
+          [
+            SerializerProtocol.Atom.encode(key),
+            SerializerProtocol.encode(Map.get(map, key))
+          ]
       end)
 
     [?d, dict, ?e]

@@ -81,6 +81,7 @@ end
 
 defimpl HiveTorrent.Bencode.SerializerProtocol, for: Map do
   alias HiveTorrent.Bencode.SerializerProtocol
+  alias HiveTorrent.Bencode.SerializeError
 
   def encode(map) when map_size(map) == 0, do: "de"
 
@@ -101,6 +102,11 @@ defimpl HiveTorrent.Bencode.SerializerProtocol, for: Map do
             SerializerProtocol.Atom.encode(key),
             SerializerProtocol.encode(Map.get(map, key))
           ]
+
+        key ->
+          raise SerializeError,
+            value: key,
+            message: "Supported map key types are only Atoms and Strings"
       end)
 
     [?d, dict, ?e]

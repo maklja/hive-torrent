@@ -112,4 +112,13 @@ defmodule HiveTorrent.Bencode.SerializerTest do
     error = catch_error(Serializer.encode(func))
     assert error == %SerializeError{value: func, message: "Unsupported types: Function"}
   end
+
+  test "serialize unsupported map key type" do
+    error = catch_error(Serializer.encode(%{{1} => "test"}))
+
+    assert error == %SerializeError{
+             value: {1},
+             message: "Supported map key types are only Atoms and Strings"
+           }
+  end
 end

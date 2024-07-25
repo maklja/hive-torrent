@@ -14,10 +14,37 @@ defmodule HiveTorrent.Bencode.SerializeError do
 end
 
 defmodule HiveTorrent.Bencode.Serializer do
+  @moduledoc """
+  Serialize Elixir types to Bencode.
+  Supported types are atoms, integers, strings, lists and maps.
+  Structs are also supported and will be serialized as map.
+  Serialization of the custom types can be expanded using protocol HiveTorrent.Bencode.SerializerProtocol.
+
+  Reference:
+
+  - http://www.bittorrent.org/beps/bep_0003.html#bencoding
+  - https://en.wikipedia.org/wiki/Bencode
+  """
+
   alias HiveTorrent.Bencode.SerializerProtocol
 
   @type serializable :: SerializerProtocol.serializable()
 
+  @doc """
+  Serialize Elixir types into the Bencode format.
+
+  Returns Bencode string value, otherwise raises HiveTorrent.Bencode.SerializeError
+
+  ## Examples
+      iex> HiveTorrent.Bencode.Serializer.encode(1)
+      "i1e"
+
+      iex> HiveTorrent.Bencode.Serializer.encode(%{test: 999})
+      "d4:testi999ee"
+
+      iex> HiveTorrent.Bencode.Serializer.encode(9.99)
+      ** (HiveTorrent.Bencode.SerializeError) Unsupported types: Float
+  """
   @spec encode(serializable()) :: binary() | no_return()
   def encode(value) do
     value |> SerializerProtocol.encode() |> IO.iodata_to_binary()

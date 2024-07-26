@@ -1,4 +1,4 @@
-defmodule HiveTorrentApplication do
+defmodule HiveTorrent.Bencode.Application do
   @moduledoc """
   Documentation for `HiveTorrentApplication`.
   """
@@ -13,12 +13,13 @@ defmodule HiveTorrentApplication do
 
   """
   def hello do
-    path = Path.join(:code.priv_dir(:hive_torrent), "example_1.torrent")
-    {:ok, file} = File.open(path, [:binary, :read])
-    data = IO.binread(file, :eof)
+    path = Path.join(:code.priv_dir(:hive_torrent), "example.torrent")
+    HiveTorrent.Torrent.parse(path)
+    # {:ok, file} = File.open(path, [:binary, :read])
+    # data = IO.binread(file, :eof)
 
-    result = HiveTorrent.Bencode.Parser.parse!(data)
-    IO.inspect(result)
-    File.close(file)
+    # result = HiveTorrent.Bencode.Parser.parse(data)
+    # IO.inspect(result)
+    # File.close(file)
   end
 end

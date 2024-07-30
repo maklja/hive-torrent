@@ -82,4 +82,16 @@ defmodule HiveTorrent.Torrent do
   defp get_hashes(<<hash::bytes-size(20), rest::binary>>, num, acc) do
     get_hashes(rest, num + 1, Map.put(acc, num, hash))
   end
+
+  defp file_pieces(file_size, piece_length, piece_num \\ 0, pieces \\ [])
+
+  defp file_pieces(file_size, piece_length, piece_num, pieces) do
+    file_rem = file_size - piece_length * piece_num
+  end
+
+  # 150 40
+  # 73 27 50
+  # 40 33
+  # 27
+  # 40 10
 end

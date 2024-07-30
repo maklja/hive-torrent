@@ -98,27 +98,24 @@ defmodule HiveTorrent.Torrent do
     {file_name, file_size} = file
     {piece_num, piece_offset, piece_size} = last_piece
 
-    case file_pieces(file_size, piece_length, piece_offset + piece_size, piece_num + 1) do
-      {new_pieces, nil} ->
-        last_piece = List.first(new_pieces)
-        new_pieces = Enum.map(new_pieces, &Tuple.append(&1, file_name))
-        find_files_pieces(rest, piece_length, last_piece, new_pieces ++ pieces)
+    # case file_pieces(file_size, piece_length, piece_offset + piece_size, piece_num + 1) do
+    #   {new_pieces, nil} ->
+    #     last_piece = List.first(new_pieces)
+    #     new_pieces = Enum.map(new_pieces, &Tuple.append(&1, file_name))
+    #     find_files_pieces(rest, piece_length, last_piece, new_pieces ++ pieces)
 
-      {new_pieces, last_piece} ->
-        new_pieces = Enum.map(new_pieces, &Tuple.append(&1, file_name))
-        # new_pieces = if length(rest) > 0, do: [last_piece | new_pieces], else: new_pieces
-        find_files_pieces(rest, piece_length, last_piece, new_pieces ++ pieces)
-    end
+    #   {new_pieces, last_piece} ->
+    #     new_pieces = Enum.map(new_pieces, &Tuple.append(&1, file_name))
+    #     # new_pieces = if length(rest) > 0, do: [last_piece | new_pieces], else: new_pieces
+    #     find_files_pieces(rest, piece_length, last_piece, new_pieces ++ pieces)
+    # end
   end
 
   defp file_pieces(file_size, piece_length, piece_offset, piece_num, pieces \\ [])
 
-  defp file_pieces(0, _piece_length, _piece_offset, _piece_num, pieces) do
-    {pieces, nil}
-  end
-
   defp file_pieces(file_size, piece_length, piece_offset, piece_num, pieces) when file_size > 0 do
-    file_size_rem = file_size - piece_length
+    piece_length_rem = piece_length - rem(piece_offset, piece_length)
+    file_size_rem = file_size - piece_length_rem
 
     cond do
       file_size_rem >= 0 ->
@@ -138,11 +135,7 @@ defmodule HiveTorrent.Torrent do
     end
   end
 
-  defp file_pieces(file_size, _piece_length, piece_offset, piece_num, pieces)
-       when file_size < 0 do
-    last_piece = {piece_num, piece_offset, abs(file_size)}
-    {pieces, last_piece}
-  end
+  defp file_pieces(_file_size, _piece_length, _piece_offset, _piece_num, pieces), do: pieces
 
   # you don't need last piece, you can just use offset
   # 40 - rem(80, 40)

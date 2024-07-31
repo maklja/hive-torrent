@@ -1,8 +1,18 @@
-defmodule HiveTorrent.TorrentInfoMeta do
-  defstruct [:files]
-end
-
 defmodule HiveTorrent.Torrent do
+  @type t :: %__MODULE__{
+          trackers: [String.t(), ...],
+          name: String.t(),
+          comment: String.t(),
+          created_by: String.t(),
+          creation_date: DateTime.t() | nil,
+          files: [{String.t(), pos_integer()}, ...],
+          size: pos_integer(),
+          piece_length: pos_integer(),
+          pieces: %{
+            pos_integer() => [{<<_::20>>, pos_integer(), pos_integer(), String.t()}, ...]
+          }
+        }
+
   defstruct [
     :trackers,
     :name,
@@ -11,7 +21,8 @@ defmodule HiveTorrent.Torrent do
     :creation_date,
     :files,
     :size,
-    :piece_length
+    :piece_length,
+    :pieces
   ]
 
   def parse(file_path) do
@@ -21,50 +32,49 @@ defmodule HiveTorrent.Torrent do
          {:ok, info} <- Map.fetch(torrent_data, "info"),
          {:ok, name} <- Map.fetch(info, "name"),
          {:ok, piece_length} <- Map.fetch(info, "piece length"),
+         creation_date <- get_creation_date(torrent_data),
          comment <- Map.get(torrent_data, "comment", ""),
-         created_by <- Map.get(torrent_data, "created by", ""),
-         {:ok, creation_date} <- Map.get(torrent_data, "creation date", 0) |> DateTime.from_unix() do
+         created_by <- Map.get(torrent_data, "created by", "") do
       files = get_files(info, name)
       files_size = Enum.reduce(files, 0, &(elem(&1, 1) + &2))
       pieces_hashes = get_hashes(Map.get(info, "pieces"))
 
-      files_1 = [{"Test1", 73}, {"Test2", 37}, {"Test3", 40}]
+      pieces_map =
+        files
+        |> file_pieces(piece_length)
+        |> Enum.reduce(Map.new(), fn {piece_num, piece_offset, piece_size, file_path},
+                                     pieces_map ->
+          {:ok, piece_hash} = Map.fetch(pieces_hashes, piece_num)
+          piece_info = {piece_hash, piece_offset, piece_size, file_path}
 
-      files_pieces =
-        files_1
-        |> find_files_pieces(40)
+          Map.update(pieces_map, piece_num, [piece_info], &[piece_info | &1])
+        end)
+        |> Enum.map(fn {key, value} -> {key, Enum.reverse(value)} end)
+        |> Map.new()
 
-      # files_pieces = file_pieces(40, 40)
-      IO.inspect(files_pieces)
-
-      test =
-        {:ok,
-         %__MODULE__{
-           trackers: trackers,
-           name: name,
-           comment: comment,
-           created_by: created_by,
-           creation_date: creation_date,
-           files: files,
-           size: files_size,
-           piece_length: piece_length
-         }}
-
-      # IO.inspect(test)
-
-      # IO.inspect(byte_size(Map.get(Map.get(torrent_data, "info"), "pieces")))
+      {:ok,
+       %__MODULE__{
+         trackers: trackers,
+         name: name,
+         comment: comment,
+         created_by: created_by,
+         creation_date: creation_date,
+         files: files,
+         size: files_size,
+         piece_length: piece_length,
+         pieces: pieces_map
+       }}
     end
-
-    # %Torrent{
-    #  name: name,
-    #  info_hash: info_hash,
-    #  files: files,
-    #  size: size,
-    #  trackers: trackers,
-    #  piece_length: piece_length,
-    #  pieces: piece_map
-    #  }
   end
+
+  defp get_creation_date(%{"creation date" => creation_date}) do
+    case DateTime.from_unix(creation_date) do
+      {:ok, date} -> date
+      _ -> nil
+    end
+  end
+
+  defp get_creation_date(_), do: nil
 
   defp get_trackers(%{"announce-list" => announce_list}), do: {:ok, List.flatten(announce_list)}
 
@@ -86,93 +96,55 @@ defmodule HiveTorrent.Torrent do
 
   defp get_hashes("", _num, acc), do: acc
 
-  defp get_hashes(<<hash::bytes-size(20), rest::binary>>, num, acc) do
-    get_hashes(rest, num + 1, Map.put(acc, num, hash))
-  end
+  defp get_hashes(<<hash::bytes-size(20), rest::binary>>, num, acc),
+    do: get_hashes(rest, num + 1, Map.put(acc, num, hash))
 
-  defp find_files_pieces(files, piece_length, last_piece \\ {-1, 0, 0}, pieces \\ [])
-
-  defp find_files_pieces([], _piece_length, _last_piece, pieces), do: Enum.reverse(pieces)
-
-  defp find_files_pieces([file | rest], piece_length, last_piece, pieces) do
-    {file_name, file_size} = file
-    {piece_num, piece_offset, piece_size} = last_piece
-
-    # case file_pieces(file_size, piece_length, piece_offset + piece_size, piece_num + 1) do
-    #   {new_pieces, nil} ->
-    #     last_piece = List.first(new_pieces)
-    #     new_pieces = Enum.map(new_pieces, &Tuple.append(&1, file_name))
-    #     find_files_pieces(rest, piece_length, last_piece, new_pieces ++ pieces)
-
-    #   {new_pieces, last_piece} ->
-    #     new_pieces = Enum.map(new_pieces, &Tuple.append(&1, file_name))
-    #     # new_pieces = if length(rest) > 0, do: [last_piece | new_pieces], else: new_pieces
-    #     find_files_pieces(rest, piece_length, last_piece, new_pieces ++ pieces)
-    # end
-  end
-
-  defp file_pieces(files, piece_length, piece_offset, piece_num, pieces \\ [])
+  defp file_pieces(files, piece_length, piece_offset \\ 0, piece_num \\ 0, pieces \\ [])
 
   defp file_pieces([], _piece_length, _piece_offset, _piece_num, pieces),
-    do: pieces
+    do: Enum.reverse(pieces)
 
-  defp file_pieces([file | rest] = files, piece_length, piece_offset, piece_num, pieces) do
-    {file_name, file_size} = file
+  defp file_pieces([file | rest], piece_length, piece_offset, piece_num, pieces) do
+    {file_path, file_size} = file
 
     piece_rem = piece_length - rem(piece_offset, piece_length)
     piece_chunk_size = if piece_rem == 0, do: piece_length, else: piece_rem
-    # 40 - 40/40
-    # 73 - 40 => 33
-    # 40 -73 / 40 => 7
-    # 73 7
-    file_size_rem = file_size - piece_offset
+    file_size_rem = file_size - piece_chunk_size
 
     cond do
-      file_size_rem === 0 ->
-        :ok
+      file_size_rem == 0 ->
+        new_piece_offset = piece_offset + piece_chunk_size
+        piece = {piece_num, piece_offset, piece_chunk_size, file_path}
 
-      file_size_rem > piece_length ->
-        new_piece_offset = piece_offset + piece_length
-        piece = {piece_num, piece_offset, piece_length, file_name}
-        file_pieces(files, piece_length, new_piece_offset, piece_num + 1, [piece | pieces])
+        file_pieces(
+          rest,
+          piece_length,
+          new_piece_offset,
+          piece_num + 1,
+          [
+            piece | pieces
+          ]
+        )
+
+      file_size_rem > 0 ->
+        new_piece_offset = piece_offset + piece_chunk_size
+        piece = {piece_num, piece_offset, piece_chunk_size, file_path}
+
+        file_pieces(
+          [{file_path, file_size_rem} | rest],
+          piece_length,
+          new_piece_offset,
+          piece_num + 1,
+          [
+            piece | pieces
+          ]
+        )
 
       true ->
-        new_piece_offset = piece_offset + abs(file_size_rem)
-        piece = {piece_num, piece_offset, abs(file_size_rem), file_name}
+        piece_size = piece_chunk_size + file_size_rem
+        new_piece_offset = piece_offset + piece_size
+        piece = {piece_num, piece_offset, piece_size, file_path}
         file_pieces(rest, piece_length, new_piece_offset, piece_num, [piece | pieces])
     end
-
-    # piece_length_rem = piece_length - rem(piece_offset, piece_length)
-    # file_size_rem = file_size - piece_length_rem
-
-    # cond do
-    #   file_size_rem >= 0 ->
-    #     piece = {piece_num, piece_offset, piece_length}
-
-    #     file_pieces(file_size_rem, piece_length, piece_offset + piece_length, piece_num + 1, [
-    #       piece | pieces
-    #     ])
-
-    #   true ->
-    #     piece_size = piece_length + file_size_rem
-    #     piece = {piece_num, piece_offset, piece_size}
-
-    #     file_pieces(file_size_rem, piece_length, piece_offset + piece_size, piece_num, [
-    #       piece | pieces
-    #     ])
-    # end
   end
-
-  defp file_pieces(_file_size, _piece_length, _piece_offset, _piece_num, pieces), do: pieces
-
-  # you don't need last piece, you can just use offset
-  # 40 - rem(80, 40)
-
-  # 73 27 50
-  # 40
-  # 33
-  # 7
-  # 20
-  # 40
-  # 10
 end

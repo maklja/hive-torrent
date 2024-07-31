@@ -111,32 +111,68 @@ defmodule HiveTorrent.Torrent do
     # end
   end
 
-  defp file_pieces(file_size, piece_length, piece_offset, piece_num, pieces \\ [])
+  defp file_pieces(files, piece_length, piece_offset, piece_num, pieces \\ [])
 
-  defp file_pieces(file_size, piece_length, piece_offset, piece_num, pieces) when file_size > 0 do
-    piece_length_rem = piece_length - rem(piece_offset, piece_length)
-    file_size_rem = file_size - piece_length_rem
+  defp file_pieces([], _piece_length, _piece_offset, _piece_num, pieces),
+    do: pieces
+
+  defp file_pieces([file | rest] = files, piece_length, piece_offset, piece_num, pieces) do
+    {file_name, file_size} = file
+
+    piece_rem = piece_length - rem(piece_offset, piece_length)
+    piece_chunk_size = if piece_rem == 0, do: piece_length, else: piece_rem
+    # 40 - 40/40
+    # 73 - 40 => 33
+    # 40 -73 / 40 => 7
+    # 73 7
+    file_size_rem = file_size - piece_offset
 
     cond do
-      file_size_rem >= 0 ->
-        piece = {piece_num, piece_offset, piece_length}
+      file_size_rem === 0 ->
+        :ok
 
-        file_pieces(file_size_rem, piece_length, piece_offset + piece_length, piece_num + 1, [
-          piece | pieces
-        ])
+      file_size_rem > piece_length ->
+        new_piece_offset = piece_offset + piece_length
+        piece = {piece_num, piece_offset, piece_length, file_name}
+        file_pieces(files, piece_length, new_piece_offset, piece_num + 1, [piece | pieces])
 
       true ->
-        piece_size = piece_length + file_size_rem
-        piece = {piece_num, piece_offset, piece_size}
-
-        file_pieces(file_size_rem, piece_length, piece_offset + piece_size, piece_num, [
-          piece | pieces
-        ])
+        new_piece_offset = piece_offset + abs(file_size_rem)
+        piece = {piece_num, piece_offset, abs(file_size_rem), file_name}
+        file_pieces(rest, piece_length, new_piece_offset, piece_num, [piece | pieces])
     end
+
+    # piece_length_rem = piece_length - rem(piece_offset, piece_length)
+    # file_size_rem = file_size - piece_length_rem
+
+    # cond do
+    #   file_size_rem >= 0 ->
+    #     piece = {piece_num, piece_offset, piece_length}
+
+    #     file_pieces(file_size_rem, piece_length, piece_offset + piece_length, piece_num + 1, [
+    #       piece | pieces
+    #     ])
+
+    #   true ->
+    #     piece_size = piece_length + file_size_rem
+    #     piece = {piece_num, piece_offset, piece_size}
+
+    #     file_pieces(file_size_rem, piece_length, piece_offset + piece_size, piece_num, [
+    #       piece | pieces
+    #     ])
+    # end
   end
 
   defp file_pieces(_file_size, _piece_length, _piece_offset, _piece_num, pieces), do: pieces
 
   # you don't need last piece, you can just use offset
   # 40 - rem(80, 40)
+
+  # 73 27 50
+  # 40
+  # 33
+  # 7
+  # 20
+  # 40
+  # 10
 end

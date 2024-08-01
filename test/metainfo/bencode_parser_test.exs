@@ -49,126 +49,162 @@ defmodule HiveTorrent.Bencode.ParserTest do
       assert result == {:error, %SyntaxError{message: expected}}
     end
 
-    test "parse minus only integer" do
-      result = "i-e" |> IO.iodata_to_binary() |> Parser.parse()
-      assert result == {:error, %SyntaxError{message: "Unexpected token 'i-e' while parsing"}}
+    test "parse minus only integer", fixture do
+      {value, expected} = fixture.test_numbers.minus_only
+      result = value |> IO.iodata_to_binary() |> Parser.parse()
+      assert result == {:error, %SyntaxError{message: expected}}
     end
 
-    test "parse corrupted integer" do
-      result = "i1-e" |> IO.iodata_to_binary() |> Parser.parse()
-      assert result == {:error, %SyntaxError{message: "Unexpected token '-e' while parsing"}}
+    test "parse corrupted integer", fixture do
+      {value, expected} = fixture.test_numbers.corrupted
+      result = value |> IO.iodata_to_binary() |> Parser.parse()
+      assert result == {:error, %SyntaxError{message: expected}}
     end
 
-    test "parse float" do
-      result = "i1.2e" |> IO.iodata_to_binary() |> Parser.parse()
-      assert result == {:error, %SyntaxError{message: "Unexpected token '.2e' while parsing"}}
+    test "parse float", fixture do
+      {value, expected} = fixture.test_numbers.float
+      result = value |> IO.iodata_to_binary() |> Parser.parse()
+      assert result == {:error, %SyntaxError{message: expected}}
     end
 
-    test "parse integer without closing token" do
-      result = "i12" |> IO.iodata_to_binary() |> Parser.parse()
-      assert result == {:error, %SyntaxError{message: "Unexpected end of the input"}}
+    test "parse integer without closing token", fixture do
+      {value, expected} = fixture.test_numbers.no_closing_tag
+      result = value |> IO.iodata_to_binary() |> Parser.parse()
+      assert result == {:error, %SyntaxError{message: expected}}
     end
 
-    test "parse! positive integer" do
-      assert "i30e" |> IO.iodata_to_binary() |> Parser.parse!() == 30
+    test "parse! positive integer", fixture do
+      {value, expected} = fixture.test_numbers.positive_int
+      assert value |> IO.iodata_to_binary() |> Parser.parse!() == expected
     end
 
-    test "parse! negative integer" do
-      assert "i-999e" |> IO.iodata_to_binary() |> Parser.parse!() == -999
+    test "parse! negative integer", fixture do
+      {value, expected} = fixture.test_numbers.negative_int
+      assert value |> IO.iodata_to_binary() |> Parser.parse!() == expected
     end
 
-    test "parse! zero integer" do
-      assert "i0e" |> IO.iodata_to_binary() |> Parser.parse!() == 0
+    test "parse! zero integer", fixture do
+      {value, expected} = fixture.test_numbers.zero
+      assert value |> IO.iodata_to_binary() |> Parser.parse!() == expected
     end
 
-    test "parse! negative zero integer" do
-      error = catch_error("i-0e" |> IO.iodata_to_binary() |> Parser.parse!())
-      assert error == %SyntaxError{message: "Unexpected token 'i-0?e' while parsing"}
+    test "parse! negative zero integer", fixture do
+      {value, expected} = fixture.test_numbers.negative_zero
+      error = catch_error(value |> IO.iodata_to_binary() |> Parser.parse!())
+      assert error == %SyntaxError{message: expected}
     end
 
-    test "parse! empty integer" do
-      error = catch_error("ie" |> IO.iodata_to_binary() |> Parser.parse!())
-      assert error == %SyntaxError{message: "Unexpected token 'ie' while parsing"}
+    test "parse! empty integer", fixture do
+      {value, expected} = fixture.test_numbers.empty
+      error = catch_error(value |> IO.iodata_to_binary() |> Parser.parse!())
+      assert error == %SyntaxError{message: expected}
     end
 
-    test "parse! minus only integer" do
-      error = catch_error("i-e" |> IO.iodata_to_binary() |> Parser.parse!())
-      assert error == %SyntaxError{message: "Unexpected token 'i-e' while parsing"}
+    test "parse! minus only integer", fixture do
+      {value, expected} = fixture.test_numbers.minus_only
+      error = catch_error(value |> IO.iodata_to_binary() |> Parser.parse!())
+      assert error == %SyntaxError{message: expected}
     end
 
-    test "parse! corrupted integer" do
-      result = catch_error("i1-e" |> IO.iodata_to_binary() |> Parser.parse!())
-      assert result == %SyntaxError{message: "Unexpected token '-e' while parsing"}
+    test "parse! corrupted integer", fixture do
+      {value, expected} = fixture.test_numbers.corrupted
+      result = catch_error(value |> IO.iodata_to_binary() |> Parser.parse!())
+      assert result == %SyntaxError{message: expected}
     end
 
-    test "parse! float" do
-      result = catch_error("i1.2e" |> IO.iodata_to_binary() |> Parser.parse!())
-      assert result == %SyntaxError{message: "Unexpected token '.2e' while parsing"}
+    test "parse! float", fixture do
+      {value, expected} = fixture.test_numbers.float
+      result = catch_error(value |> IO.iodata_to_binary() |> Parser.parse!())
+      assert result == %SyntaxError{message: expected}
     end
 
-    test "parse! integer without closing token" do
-      result = catch_error("i12" |> IO.iodata_to_binary() |> Parser.parse!())
-      assert result == %SyntaxError{message: "Unexpected end of the input"}
-    end
-  end
-
-  describe "String tests parse with tuple" do
-    test "parse string" do
-      assert "8:software" |> IO.iodata_to_binary() |> Parser.parse() == {:ok, "software"}
-    end
-
-    test "parse empty string" do
-      assert "0:" |> IO.iodata_to_binary() |> Parser.parse() == {:ok, ""}
-    end
-
-    test "parse string with invalid length" do
-      result = "8:test" |> IO.iodata_to_binary() |> Parser.parse()
-      assert result == {:error, %SyntaxError{message: "Unexpected end of the input"}}
-    end
-
-    test "parse string with short length" do
-      result = "2:test" |> IO.iodata_to_binary() |> Parser.parse()
-      assert result == {:error, %SyntaxError{message: "Unexpected token 'st' while parsing"}}
-    end
-
-    test "parse string with corrupted length" do
-      result = "x:test" |> IO.iodata_to_binary() |> Parser.parse()
-      assert result == {:error, %SyntaxError{message: "Unexpected token 'x:test' while parsing"}}
-    end
-
-    test "parse invalid string" do
-      result = ":test" |> IO.iodata_to_binary() |> Parser.parse()
-      assert result == {:error, %SyntaxError{message: "Unexpected token ':test' while parsing"}}
+    test "parse! integer without closing token", fixture do
+      {value, expected} = fixture.test_numbers.no_closing_tag
+      result = catch_error(value |> IO.iodata_to_binary() |> Parser.parse!())
+      assert result == %SyntaxError{message: expected}
     end
   end
 
-  describe "String tests parse with exception" do
-    test "parse! string" do
-      assert "8:software" |> IO.iodata_to_binary() |> Parser.parse!() == "software"
+  describe "String parse tests" do
+    setup do
+      [
+        test_strings: %{
+          software: {"8:software", "software"},
+          empty: {"0:", ""},
+          invalid_length: {"8:test", "Unexpected end of the input"},
+          short_length: {"2:test", "Unexpected token 'st' while parsing"},
+          corrupted: {"x:test", "Unexpected token 'x:test' while parsing"},
+          invalid_string: {":test", "Unexpected token ':test' while parsing"}
+        }
+      ]
     end
 
-    test "parse! empty string" do
-      assert "0:" |> IO.iodata_to_binary() |> Parser.parse!() == ""
+    test "parse string", fixture do
+      {value, expected} = fixture.test_strings.software
+      assert value |> IO.iodata_to_binary() |> Parser.parse() == {:ok, expected}
     end
 
-    test "parse! string with invalid length" do
-      error = catch_error("8:test" |> IO.iodata_to_binary() |> Parser.parse!())
-      assert error == %SyntaxError{message: "Unexpected end of the input"}
+    test "parse empty string", fixture do
+      {value, expected} = fixture.test_strings.empty
+      assert value |> IO.iodata_to_binary() |> Parser.parse() == {:ok, expected}
     end
 
-    test "parse! string with short length" do
-      error = catch_error("2:test" |> IO.iodata_to_binary() |> Parser.parse!())
-      assert error == %SyntaxError{message: "Unexpected token 'st' while parsing"}
+    test "parse string with invalid length", fixture do
+      {value, expected} = fixture.test_strings.invalid_length
+      result = value |> IO.iodata_to_binary() |> Parser.parse()
+      assert result == {:error, %SyntaxError{message: expected}}
     end
 
-    test "parse! string with corrupted length" do
-      error = catch_error("x:test" |> IO.iodata_to_binary() |> Parser.parse!())
-      assert error == %SyntaxError{message: "Unexpected token 'x:test' while parsing"}
+    test "parse string with short length", fixture do
+      {value, expected} = fixture.test_strings.short_length
+      result = value |> IO.iodata_to_binary() |> Parser.parse()
+      assert result == {:error, %SyntaxError{message: expected}}
     end
 
-    test "parse! invalid string" do
-      error = catch_error(":test" |> IO.iodata_to_binary() |> Parser.parse!())
-      assert error == %SyntaxError{message: "Unexpected token ':test' while parsing"}
+    test "parse string with corrupted length", fixture do
+      {value, expected} = fixture.test_strings.corrupted
+      result = value |> IO.iodata_to_binary() |> Parser.parse()
+      assert result == {:error, %SyntaxError{message: expected}}
+    end
+
+    test "parse invalid string", fixture do
+      {value, expected} = fixture.test_strings.invalid_string
+      result = value |> IO.iodata_to_binary() |> Parser.parse()
+      assert result == {:error, %SyntaxError{message: expected}}
+    end
+
+    test "parse! string", fixture do
+      {value, expected} = fixture.test_strings.software
+      assert value |> IO.iodata_to_binary() |> Parser.parse!() == expected
+    end
+
+    test "parse! empty string", fixture do
+      {value, expected} = fixture.test_strings.empty
+      assert value |> IO.iodata_to_binary() |> Parser.parse!() == expected
+    end
+
+    test "parse! string with invalid length", fixture do
+      {value, expected} = fixture.test_strings.invalid_length
+      error = catch_error(value |> IO.iodata_to_binary() |> Parser.parse!())
+      assert error == %SyntaxError{message: expected}
+    end
+
+    test "parse! string with short length", fixture do
+      {value, expected} = fixture.test_strings.short_length
+      error = catch_error(value |> IO.iodata_to_binary() |> Parser.parse!())
+      assert error == %SyntaxError{message: expected}
+    end
+
+    test "parse! string with corrupted length", fixture do
+      {value, expected} = fixture.test_strings.corrupted
+      error = catch_error(value |> IO.iodata_to_binary() |> Parser.parse!())
+      assert error == %SyntaxError{message: expected}
+    end
+
+    test "parse! invalid string", fixture do
+      {value, expected} = fixture.test_strings.invalid_string
+      error = catch_error(value |> IO.iodata_to_binary() |> Parser.parse!())
+      assert error == %SyntaxError{message: expected}
     end
   end
 

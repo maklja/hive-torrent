@@ -1,8 +1,6 @@
 defmodule HiveTorrent.Bencode.SyntaxError do
   defexception [:message]
 
-  @type t(message) :: %__MODULE__{message: message}
-
   @type t :: %__MODULE__{message: String.t()}
 
   @impl true

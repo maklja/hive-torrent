@@ -57,7 +57,7 @@ defmodule HiveTorrent.Torrent do
         |> Enum.map(fn {key, value} -> {key, Enum.reverse(value)} end)
         |> Map.new()
 
-      bencoded_info = Serializer.encode(info)
+      {:ok, bencoded_info} = Serializer.encode(info)
       info_hash = :crypto.hash(:sha, bencoded_info)
 
       {:ok,

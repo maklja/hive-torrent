@@ -5,8 +5,6 @@ defmodule HiveTorrent.Bencode.SerializeError do
 
   defexception [:value, :message]
 
-  @type t(value, message) :: %__MODULE__{value: value, message: message}
-
   @type t :: %__MODULE__{value: String.t()}
 
   @impl true
@@ -53,7 +51,23 @@ defmodule HiveTorrent.Bencode.Serializer do
     end
   end
 
-  @spec encode(serializable()) :: binary() | no_return()
+  @doc """
+  Serialize Elixir types into the Bencode format.
+
+  Returns {:ok, result}, otherwise {:error, %HiveTorrent.Bencode.SerializeError}
+
+  ## Examples
+      iex> HiveTorrent.Bencode.Serializer.encode(1)
+      {:ok, "i1e"}
+
+      iex> HiveTorrent.Bencode.Serializer.encode(%{test: 999})
+      {:ok, "d4:testi999ee"}
+
+      iex> HiveTorrent.Bencode.Serializer.encode(9.99)
+      {:error, %HiveTorrent.Bencode.SerializeError{message: "Unsupported types: Float", value: 9.99}}
+  """
+  @spec encode(serializable()) ::
+          {:ok, binary()} | {:error, HiveTorrent.Bencode.SerializeError.t()}
   def encode(value) do
     try do
       encoded_value = value |> SerializerProtocol.encode() |> IO.iodata_to_binary()

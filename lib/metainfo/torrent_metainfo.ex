@@ -1,4 +1,7 @@
 defmodule HiveTorrent.Torrent do
+  alias HiveTorrent.Bencode.Serializer
+  alias HiveTorrent.Bencode.Parser
+
   @type t :: %__MODULE__{
           trackers: [String.t(), ...],
           name: String.t(),
@@ -10,7 +13,8 @@ defmodule HiveTorrent.Torrent do
           piece_length: pos_integer(),
           pieces: %{
             pos_integer() => [{<<_::20>>, pos_integer(), pos_integer(), String.t()}, ...]
-          }
+          },
+          info_hash: <<_::20>>
         }
 
   defstruct [
@@ -22,12 +26,13 @@ defmodule HiveTorrent.Torrent do
     :files,
     :size,
     :piece_length,
-    :pieces
+    :pieces,
+    :info_hash
   ]
 
-  def parse(file_path) do
+  def parse(file_path) when is_bitstring(file_path) do
     with {:ok, data} <- File.read(file_path),
-         {:ok, torrent_data} <- HiveTorrent.Bencode.Parser.parse(data),
+         {:ok, torrent_data} <- Parser.parse(data),
          {:ok, trackers} <- get_trackers(torrent_data),
          {:ok, info} <- Map.fetch(torrent_data, "info"),
          {:ok, name} <- Map.fetch(info, "name"),
@@ -52,6 +57,9 @@ defmodule HiveTorrent.Torrent do
         |> Enum.map(fn {key, value} -> {key, Enum.reverse(value)} end)
         |> Map.new()
 
+      bencoded_info = Serializer.encode(info)
+      info_hash = :crypto.hash(:sha, bencoded_info)
+
       {:ok,
        %__MODULE__{
          trackers: trackers,
@@ -62,7 +70,8 @@ defmodule HiveTorrent.Torrent do
          files: files,
          size: files_size,
          piece_length: piece_length,
-         pieces: pieces_map
+         pieces: pieces_map,
+         info_hash: info_hash
        }}
     end
   end

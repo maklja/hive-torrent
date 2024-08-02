@@ -208,115 +208,156 @@ defmodule HiveTorrent.Bencode.ParserTest do
     end
   end
 
-  describe "List tests parse with tuple" do
-    test "parse list of integers" do
-      assert "li30ei-15ei0ee" |> IO.iodata_to_binary() |> Parser.parse() == {:ok, [30, -15, 0]}
+  describe "List parse tests" do
+    setup do
+      [
+        test_lists: %{
+          list_of_integers: {"li30ei-15ei0ee", [30, -15, 0]},
+          list_of_strings: {"l8:software11:developmente", ["software", "development"]},
+          empty: {"le", []},
+          list_of_lists: {"lli999eee", [[999]]},
+          list_of_maps: {"ld3:cati4eedee", [%{"cat" => 4}, %{}]},
+          corrupted: {"ld3:cati4eede", "Unexpected end of the input"}
+        }
+      ]
     end
 
-    test "parse list of strings" do
-      assert "l8:software11:developmente" |> IO.iodata_to_binary() |> Parser.parse() ==
-               {:ok, ["software", "development"]}
+    test "parse list of integers", fixture do
+      {value, expected} = fixture.test_lists.list_of_integers
+      assert value |> IO.iodata_to_binary() |> Parser.parse() == {:ok, expected}
     end
 
-    test "parse empty list" do
-      assert "le" |> IO.iodata_to_binary() |> Parser.parse() == {:ok, []}
+    test "parse list of strings", fixture do
+      {value, expected} = fixture.test_lists.list_of_strings
+
+      assert value |> IO.iodata_to_binary() |> Parser.parse() ==
+               {:ok, expected}
     end
 
-    test "parse list of the list" do
-      assert "lli999eee" |> IO.iodata_to_binary() |> Parser.parse() == {:ok, [[999]]}
+    test "parse empty list", fixture do
+      {value, expected} = fixture.test_lists.empty
+      assert value |> IO.iodata_to_binary() |> Parser.parse() == {:ok, expected}
     end
 
-    test "parse list of the map" do
-      result = "ld3:cati4eedee" |> IO.iodata_to_binary() |> Parser.parse()
-      assert result == {:ok, [%{"cat" => 4}, %{}]}
+    test "parse list of the list", fixture do
+      {value, expected} = fixture.test_lists.list_of_lists
+      assert value |> IO.iodata_to_binary() |> Parser.parse() == {:ok, expected}
     end
 
-    test "parse list without closing token" do
-      result = "ld3:cati4eede" |> IO.iodata_to_binary() |> Parser.parse()
-      assert result == {:error, %SyntaxError{message: "Unexpected end of the input"}}
-    end
-  end
-
-  describe "List tests parse with exception" do
-    test "parse! list of integers" do
-      assert "li30ei-15ei0ee" |> IO.iodata_to_binary() |> Parser.parse!() == [30, -15, 0]
+    test "parse list of the map", fixture do
+      {value, expected} = fixture.test_lists.list_of_maps
+      result = value |> IO.iodata_to_binary() |> Parser.parse()
+      assert result == {:ok, expected}
     end
 
-    test "parse! list of strings" do
-      assert "l8:software11:developmente" |> IO.iodata_to_binary() |> Parser.parse!() == [
-               "software",
-               "development"
-             ]
+    test "parse list without closing token", fixture do
+      {value, expected} = fixture.test_lists.corrupted
+      result = value |> IO.iodata_to_binary() |> Parser.parse()
+      assert result == {:error, %SyntaxError{message: expected}}
     end
 
-    test "parse! empty list" do
-      assert "le" |> IO.iodata_to_binary() |> Parser.parse!() == []
+    test "parse! list of integers", fixture do
+      {value, expected} = fixture.test_lists.list_of_integers
+      assert value |> IO.iodata_to_binary() |> Parser.parse!() == expected
     end
 
-    test "parse! list of the list" do
-      assert "lli999eee" |> IO.iodata_to_binary() |> Parser.parse!() == [[999]]
+    test "parse! list of strings", fixture do
+      {value, expected} = fixture.test_lists.list_of_strings
+      assert value |> IO.iodata_to_binary() |> Parser.parse!() == expected
     end
 
-    test "parse! list of the map" do
-      result = "ld3:cati4eedee" |> IO.iodata_to_binary() |> Parser.parse!()
-      assert result == [%{"cat" => 4}, %{}]
+    test "parse! empty list", fixture do
+      {value, expected} = fixture.test_lists.empty
+      assert value |> IO.iodata_to_binary() |> Parser.parse!() == expected
     end
 
-    test "parse! list without closing token" do
-      error = catch_error("ld3:cati4eede" |> IO.iodata_to_binary() |> Parser.parse!())
-      assert error == %SyntaxError{message: "Unexpected end of the input"}
-    end
-  end
-
-  describe "Map test parse with tuple" do
-    test "parse map of <string, integer>" do
-      result = "d3:keyi30ee" |> IO.iodata_to_binary() |> Parser.parse()
-      assert result == {:ok, %{"key" => 30}}
+    test "parse! list of the list", fixture do
+      {value, expected} = fixture.test_lists.list_of_lists
+      assert value |> IO.iodata_to_binary() |> Parser.parse!() == expected
     end
 
-    test "parse map of <string, list<integer>>" do
-      result = "d3:keyli30ei35eee" |> IO.iodata_to_binary() |> Parser.parse()
-      assert result == {:ok, %{"key" => [30, 35]}}
+    test "parse! list of the map", fixture do
+      {value, expected} = fixture.test_lists.list_of_maps
+      result = value |> IO.iodata_to_binary() |> Parser.parse!()
+      assert result == expected
     end
 
-    test "parse map of <string, map<string, integer>>" do
-      result = "d3:keyd3:dogi5eee" |> IO.iodata_to_binary() |> Parser.parse()
-      assert result == {:ok, %{"key" => %{"dog" => 5}}}
-    end
-
-    test "parse empty map" do
-      assert "de" |> IO.iodata_to_binary() |> Parser.parse() == {:ok, %{}}
-    end
-
-    test "parse map without closing token" do
-      result = "d3:keyd3:dogi5ee" |> IO.iodata_to_binary() |> Parser.parse()
-      assert result == {:error, %SyntaxError{message: "Unexpected end of the input"}}
+    test "parse! list without closing token", fixture do
+      {value, expected} = fixture.test_lists.corrupted
+      error = catch_error(value |> IO.iodata_to_binary() |> Parser.parse!())
+      assert error == %SyntaxError{message: expected}
     end
   end
 
-  describe "Map test parse with exception" do
-    test "parse! map of <string, integer>" do
-      result = "d3:keyi30ee" |> IO.iodata_to_binary() |> Parser.parse!()
-      assert result == %{"key" => 30}
+  describe "Map parse tests" do
+    setup do
+      [
+        test_maps: %{
+          map_of_integers: {"d3:keyi30ee", %{"key" => 30}},
+          map_of_lists: {"d3:keyli30ei35eee", %{"key" => [30, 35]}},
+          map_of_maps: {"d3:keyd3:dogi5eee", %{"key" => %{"dog" => 5}}},
+          empty: {"de", %{}},
+          corrupted: {"d3:keyd3:dogi5ee", "Unexpected end of the input"}
+        }
+      ]
     end
 
-    test "parse! map of <string, list<integer>>" do
-      result = "d3:keyli30ei35eee" |> IO.iodata_to_binary() |> Parser.parse!()
-      assert result == %{"key" => [30, 35]}
+    test "parse map of <string, integer>", fixture do
+      {value, expected} = fixture.test_maps.map_of_integers
+      result = value |> IO.iodata_to_binary() |> Parser.parse()
+      assert result == {:ok, expected}
     end
 
-    test "parse! map of <string, map<string, integer>>" do
-      result = "d3:keyd3:dogi5eee" |> IO.iodata_to_binary() |> Parser.parse!()
-      assert result == %{"key" => %{"dog" => 5}}
+    test "parse map of <string, list<integer>>", fixture do
+      {value, expected} = fixture.test_maps.map_of_lists
+      result = value |> IO.iodata_to_binary() |> Parser.parse()
+      assert result == {:ok, expected}
     end
 
-    test "parse! empty map" do
-      assert "de" |> IO.iodata_to_binary() |> Parser.parse!() == %{}
+    test "parse map of <string, map<string, integer>>", fixture do
+      {value, expected} = fixture.test_maps.map_of_maps
+      result = value |> IO.iodata_to_binary() |> Parser.parse()
+      assert result == {:ok, expected}
     end
 
-    test "parse! map without closing token" do
-      error = catch_error("d3:keyd3:dogi5ee" |> IO.iodata_to_binary() |> Parser.parse!())
-      assert error == %SyntaxError{message: "Unexpected end of the input"}
+    test "parse empty map", fixture do
+      {value, expected} = fixture.test_maps.empty
+      assert value |> IO.iodata_to_binary() |> Parser.parse() == {:ok, expected}
+    end
+
+    test "parse map without closing token", fixture do
+      {value, expected} = fixture.test_maps.corrupted
+      result = value |> IO.iodata_to_binary() |> Parser.parse()
+      assert result == {:error, %SyntaxError{message: expected}}
+    end
+
+    test "parse! map of <string, integer>", fixture do
+      {value, expected} = fixture.test_maps.map_of_integers
+      result = value |> IO.iodata_to_binary() |> Parser.parse!()
+      assert result == expected
+    end
+
+    test "parse! map of <string, list<integer>>", fixture do
+      {value, expected} = fixture.test_maps.map_of_lists
+      result = value |> IO.iodata_to_binary() |> Parser.parse!()
+      assert result == expected
+    end
+
+    test "parse! map of <string, map<string, integer>>", fixture do
+      {value, expected} = fixture.test_maps.map_of_maps
+      result = value |> IO.iodata_to_binary() |> Parser.parse!()
+      assert result == expected
+    end
+
+    test "parse! empty map", fixture do
+      {value, expected} = fixture.test_maps.empty
+      assert value |> IO.iodata_to_binary() |> Parser.parse!() == expected
+    end
+
+    test "parse! map without closing token", fixture do
+      {value, expected} = fixture.test_maps.corrupted
+      error = catch_error(value |> IO.iodata_to_binary() |> Parser.parse!())
+      assert error == %SyntaxError{message: expected}
     end
   end
 end

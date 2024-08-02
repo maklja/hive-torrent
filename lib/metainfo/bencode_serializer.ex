@@ -36,18 +36,31 @@ defmodule HiveTorrent.Bencode.Serializer do
   Returns Bencode string value, otherwise raises HiveTorrent.Bencode.SerializeError
 
   ## Examples
-      iex> HiveTorrent.Bencode.Serializer.encode(1)
+      iex> HiveTorrent.Bencode.Serializer.encode!(1)
       "i1e"
 
-      iex> HiveTorrent.Bencode.Serializer.encode(%{test: 999})
+      iex> HiveTorrent.Bencode.Serializer.encode!(%{test: 999})
       "d4:testi999ee"
 
-      iex> HiveTorrent.Bencode.Serializer.encode(9.99)
+      iex> HiveTorrent.Bencode.Serializer.encode!(9.99)
       ** (HiveTorrent.Bencode.SerializeError) Unsupported types: Float
   """
   @spec encode(serializable()) :: binary() | no_return()
+  def encode!(value) do
+    case encode(value) do
+      {:ok, encoded_value} -> encoded_value
+      {:error, e} -> raise e
+    end
+  end
+
+  @spec encode(serializable()) :: binary() | no_return()
   def encode(value) do
-    value |> SerializerProtocol.encode() |> IO.iodata_to_binary()
+    try do
+      encoded_value = value |> SerializerProtocol.encode() |> IO.iodata_to_binary()
+      {:ok, encoded_value}
+    rescue
+      e -> {:error, e}
+    end
   end
 end
 

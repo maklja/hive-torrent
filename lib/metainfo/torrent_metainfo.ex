@@ -30,17 +30,17 @@ defmodule HiveTorrent.Torrent do
     :info_hash
   ]
 
-  def parse(file_path) when is_bitstring(file_path) do
-    with {:ok, data} <- File.read(file_path),
-         {:ok, torrent_data} <- Parser.parse(data),
+  def parse(torrent_raw_data, opts \\ [download_path: ""]) when is_binary(torrent_raw_data) do
+    with {:ok, torrent_data} <- Parser.parse(torrent_raw_data),
          {:ok, trackers} <- get_trackers(torrent_data),
-         {:ok, info} <- Map.fetch(torrent_data, "info"),
+         {:ok, info} <- get_info(torrent_data),
+         {:ok, piece_length} <- get_piece_length(info),
          {:ok, name} <- Map.fetch(info, "name"),
-         {:ok, piece_length} <- Map.fetch(info, "piece length"),
          creation_date <- get_creation_date(torrent_data),
          comment <- Map.get(torrent_data, "comment", ""),
          created_by <- Map.get(torrent_data, "created by", "") do
-      files = get_files(info, name)
+      download_path = Keyword.get(opts, :download_path, "")
+      files = get_files(info, name, download_path)
       files_size = Enum.reduce(files, 0, &(elem(&1, 1) + &2))
       pieces_hashes = get_hashes(Map.get(info, "pieces"))
 
@@ -85,20 +85,28 @@ defmodule HiveTorrent.Torrent do
 
   defp get_creation_date(_), do: nil
 
+  defp get_piece_length(%{"piece length" => piece_length}), do: {:ok, piece_length}
+
+  defp get_piece_length(_), do: {:error, :no_piece_length}
+
+  defp get_info(%{"info" => info}), do: {:ok, info}
+
+  defp get_info(_), do: {:error, :no_info}
+
   defp get_trackers(%{"announce-list" => announce_list}), do: {:ok, List.flatten(announce_list)}
 
   defp get_trackers(%{"announce" => announce}), do: {:ok, [announce]}
 
   defp get_trackers(_), do: {:error, :no_trackers}
 
-  defp get_files(%{"files" => files}, name) do
+  defp get_files(%{"files" => files}, name, download_path) do
     Enum.map(files, fn %{"length" => length, "path" => path} ->
-      {Path.join(name, path), length}
+      {Path.join([download_path, name, path]), length}
     end)
   end
 
-  defp get_files(%{"length" => length}, name) do
-    [{name, length}]
+  defp get_files(%{"length" => length}, name, download_path) do
+    [{Path.join([download_path, name]), length}]
   end
 
   defp get_hashes(hash, num \\ 0, acc \\ %{})

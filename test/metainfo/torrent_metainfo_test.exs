@@ -2,6 +2,7 @@ defmodule HiveTorrent.TorrentTest do
   alias HiveTorrent.Torrent
   alias HiveTorrent.Bencode.Serializer
   alias HiveTorrent.Bencode.SyntaxError
+  alias HiveTorrent.TorrentError
 
   use ExUnit.Case
 
@@ -128,126 +129,182 @@ defmodule HiveTorrent.TorrentTest do
     assert error == %SyntaxError{message: expected_error_msg}
   end
 
-  # test "parse torrent without trackers" do
-  #   created_by = "Hive torrent"
-  #   comment = "Hive comment"
-  #   creation_date = 1_722_686_833
-  #   piece_length = 20
-  #   file_size = 60
-  #   file_name = "example.txt"
+  test "parse torrent without trackers" do
+    created_by = "Hive torrent"
+    comment = "Hive comment"
+    creation_date = 1_722_686_833
+    piece_length = 20
+    file_size = 60
+    file_name = "example.txt"
 
-  #   torrent_file_info = %{
-  #     "length" => file_size,
-  #     "name" => file_name,
-  #     "piece length" => piece_length,
-  #     "pieces" => "abcdeabcdeabcdeabcdeabcdeabcdeabcdeabcdeabcdeabcdeabcdeabcde"
-  #   }
+    torrent_file_info = %{
+      "length" => file_size,
+      "name" => file_name,
+      "piece length" => piece_length,
+      "pieces" => "abcdeabcdeabcdeabcdeabcdeabcdeabcdeabcdeabcdeabcdeabcdeabcde"
+    }
 
-  #   torrent_file = %{
-  #     "created by" => created_by,
-  #     "comment" => comment,
-  #     "creation date" => creation_date,
-  #     "info" => torrent_file_info
-  #   }
+    torrent_file = %{
+      "created by" => created_by,
+      "comment" => comment,
+      "creation date" => creation_date,
+      "info" => torrent_file_info
+    }
 
-  #   {:ok, torrent_data} = Serializer.encode(torrent_file)
-  #   assert Torrent.parse(torrent_data) == {:error, :no_trackers}
-  # end
+    {:ok, torrent_data} = Serializer.encode(torrent_file)
+    expected_message = "No trackers found"
+    assert Torrent.parse(torrent_data) == {:error, expected_message}
 
-  # test "parse torrent without info" do
-  #   announce = "http://tracker.example.com:8080/announce"
-  #   created_by = "Hive torrent"
-  #   comment = "Hive comment"
-  #   creation_date = 1_722_686_833
+    error = catch_error(Torrent.parse!(torrent_data))
+    assert error == %TorrentError{message: expected_message}
+  end
 
-  #   torrent_file = %{
-  #     "announce" => announce,
-  #     "created by" => created_by,
-  #     "comment" => comment,
-  #     "creation date" => creation_date
-  #   }
+  test "parse torrent without info" do
+    announce = "http://tracker.example.com:8080/announce"
+    created_by = "Hive torrent"
+    comment = "Hive comment"
+    creation_date = 1_722_686_833
 
-  #   {:ok, torrent_data} = Serializer.encode(torrent_file)
-  #   assert Torrent.parse(torrent_data) == {:error, :no_info}
-  # end
+    torrent_file = %{
+      "announce" => announce,
+      "created by" => created_by,
+      "comment" => comment,
+      "creation date" => creation_date
+    }
 
-  # test "parse torrent without piece length" do
-  #   announce = "http://tracker.example.com:8080/announce"
-  #   created_by = "Hive torrent"
-  #   comment = "Hive comment"
-  #   creation_date = 1_722_686_833
-  #   file_size = 60
-  #   file_name = "example.txt"
+    {:ok, torrent_data} = Serializer.encode(torrent_file)
+    expected_message = "No info found"
+    assert Torrent.parse(torrent_data) == {:error, expected_message}
 
-  #   torrent_file_info = %{
-  #     "length" => file_size,
-  #     "name" => file_name,
-  #     "pieces" => "abcdeabcdeabcdeabcdeabcdeabcdeabcdeabcdeabcdeabcdeabcdeabcde"
-  #   }
+    error = catch_error(Torrent.parse!(torrent_data))
+    assert error == %TorrentError{message: expected_message}
+  end
 
-  #   torrent_file = %{
-  #     "announce" => announce,
-  #     "created by" => created_by,
-  #     "comment" => comment,
-  #     "creation date" => creation_date,
-  #     "info" => torrent_file_info
-  #   }
+  test "parse torrent without piece length" do
+    announce = "http://tracker.example.com:8080/announce"
+    created_by = "Hive torrent"
+    comment = "Hive comment"
+    creation_date = 1_722_686_833
+    file_size = 60
+    file_name = "example.txt"
 
-  #   {:ok, torrent_data} = Serializer.encode(torrent_file)
-  #   assert Torrent.parse(torrent_data) == {:error, :no_piece_length}
-  # end
+    torrent_file_info = %{
+      "length" => file_size,
+      "name" => file_name,
+      "pieces" => "abcdeabcdeabcdeabcdeabcdeabcdeabcdeabcdeabcdeabcdeabcdeabcde"
+    }
 
-  # test "parse torrent without files" do
-  #   announce = "http://tracker.example.com:8080/announce"
-  #   created_by = "Hive torrent"
-  #   comment = "Hive comment"
-  #   creation_date = 1_722_686_833
-  #   piece_length = 20
-  #   file_name = "example.txt"
+    torrent_file = %{
+      "announce" => announce,
+      "created by" => created_by,
+      "comment" => comment,
+      "creation date" => creation_date,
+      "info" => torrent_file_info
+    }
 
-  #   torrent_file_info = %{
-  #     "name" => file_name,
-  #     "piece length" => piece_length,
-  #     "pieces" => "abcdeabcdeabcdeabcdeabcdeabcdeabcdeabcdeabcdeabcdeabcdeabcde"
-  #   }
+    {:ok, torrent_data} = Serializer.encode(torrent_file)
+    expected_message = "No piece length"
+    assert Torrent.parse(torrent_data) == {:error, expected_message}
 
-  #   torrent_file = %{
-  #     "announce" => announce,
-  #     "created by" => created_by,
-  #     "comment" => comment,
-  #     "creation date" => creation_date,
-  #     "info" => torrent_file_info
-  #   }
+    error = catch_error(Torrent.parse!(torrent_data))
+    assert error == %TorrentError{message: expected_message}
+  end
 
-  #   {:ok, torrent_data} = Serializer.encode(torrent_file)
-  #   assert Torrent.parse(torrent_data) == {:error, :no_files}
-  # end
+  test "parse torrent without files" do
+    announce = "http://tracker.example.com:8080/announce"
+    created_by = "Hive torrent"
+    comment = "Hive comment"
+    creation_date = 1_722_686_833
+    piece_length = 20
+    file_name = "example.txt"
 
-  # test "parse torrent with corrupted pieces" do
-  #   announce = "http://tracker.example.com:8080/announce"
-  #   created_by = "Hive torrent"
-  #   comment = "Hive comment"
-  #   creation_date = 1_722_686_833
-  #   file_size = 60
-  #   piece_length = 20
-  #   file_name = "example.txt"
+    torrent_file_info = %{
+      "name" => file_name,
+      "piece length" => piece_length,
+      "pieces" => "abcdeabcdeabcdeabcdeabcdeabcdeabcdeabcdeabcdeabcdeabcdeabcde"
+    }
 
-  #   torrent_file_info = %{
-  #     "length" => file_size,
-  #     "name" => file_name,
-  #     "piece length" => piece_length,
-  #     "pieces" => "abcdeabcdeabcdeabcdeabcdeabcdeabcdeabcde"
-  #   }
+    torrent_file = %{
+      "announce" => announce,
+      "created by" => created_by,
+      "comment" => comment,
+      "creation date" => creation_date,
+      "info" => torrent_file_info
+    }
 
-  #   torrent_file = %{
-  #     "announce" => announce,
-  #     "created by" => created_by,
-  #     "comment" => comment,
-  #     "creation date" => creation_date,
-  #     "info" => torrent_file_info
-  #   }
+    {:ok, torrent_data} = Serializer.encode(torrent_file)
+    expected_message = "No files found"
+    assert Torrent.parse(torrent_data) == {:error, expected_message}
 
-  #   {:ok, torrent_data} = Serializer.encode(torrent_file)
-  #   assert Torrent.parse(torrent_data) == {:error, :no_files}
-  # end
+    error = catch_error(Torrent.parse!(torrent_data))
+    assert error == %TorrentError{message: expected_message}
+  end
+
+  test "parse torrent with corrupted pieces" do
+    announce = "http://tracker.example.com:8080/announce"
+    created_by = "Hive torrent"
+    comment = "Hive comment"
+    creation_date = 1_722_686_833
+    file_size = 60
+    piece_length = 20
+    file_name = "example.txt"
+
+    torrent_file_info = %{
+      "length" => file_size,
+      "name" => file_name,
+      "piece length" => piece_length,
+      # piece must be dividable by 20, but here there is 39 char
+      "pieces" => "abcdeabcdeabcdeabcdeabcdeabcdeabcdeabcd"
+    }
+
+    torrent_file = %{
+      "announce" => announce,
+      "created by" => created_by,
+      "comment" => comment,
+      "creation date" => creation_date,
+      "info" => torrent_file_info
+    }
+
+    {:ok, torrent_data} = Serializer.encode(torrent_file)
+
+    expected_message = "Corrupted pieces hash"
+    assert Torrent.parse(torrent_data) == {:error, expected_message}
+
+    error = catch_error(Torrent.parse!(torrent_data))
+    assert error == %TorrentError{message: expected_message}
+  end
+
+  test "parse torrent with missing pieces" do
+    announce = "http://tracker.example.com:8080/announce"
+    created_by = "Hive torrent"
+    comment = "Hive comment"
+    creation_date = 1_722_686_833
+    file_size = 60
+    piece_length = 20
+    file_name = "example.txt"
+
+    torrent_file_info = %{
+      "length" => file_size,
+      "name" => file_name,
+      "piece length" => piece_length,
+      # piece must be dividable by 20 and must be 60 char long, but it is only 40
+      "pieces" => "abcdeabcdeabcdeabcdeabcdeabcdeabcdeabcde"
+    }
+
+    torrent_file = %{
+      "announce" => announce,
+      "created by" => created_by,
+      "comment" => comment,
+      "creation date" => creation_date,
+      "info" => torrent_file_info
+    }
+
+    {:ok, torrent_data} = Serializer.encode(torrent_file)
+
+    expected_message = "Corrupted pieces hash"
+    assert Torrent.parse(torrent_data) == {:error, expected_message}
+
+    error = catch_error(Torrent.parse!(torrent_data))
+    assert error == %TorrentError{message: expected_message}
+  end
 end

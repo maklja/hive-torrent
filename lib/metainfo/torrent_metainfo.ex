@@ -56,12 +56,12 @@ defmodule HiveTorrent.Torrent do
          {:ok, info} <- get_info(torrent_data),
          {:ok, piece_length} <- get_piece_length(info),
          name <- Map.get(info, "name", "torrent_#{DateTime.now!("Etc/UTC")}"),
-         {:ok, files} <- get_files(info, name, download_path) do
+         {:ok, files} <- get_files(info, name, download_path),
+         {:ok, pieces_hashes} <- get_hashes(Map.get(info, "pieces")) do
       creation_date = get_creation_date(torrent_data)
       comment = Map.get(torrent_data, "comment", "")
       created_by = Map.get(torrent_data, "created by", "")
       files_size = Enum.reduce(files, 0, &(elem(&1, 1) + &2))
-      pieces_hashes = get_hashes(Map.get(info, "pieces"))
 
       pieces_map =
         files
@@ -106,11 +106,11 @@ defmodule HiveTorrent.Torrent do
 
   defp get_piece_length(%{"piece length" => piece_length}), do: {:ok, piece_length}
 
-  defp get_piece_length(_), do: {:error, :no_piece_length}
+  defp get_piece_length(_), do: {:error, "No piece length"}
 
   defp get_info(%{"info" => info}), do: {:ok, info}
 
-  defp get_info(_), do: {:error, :no_info}
+  defp get_info(_), do: {:error, "No info found"}
 
   defp get_trackers(%{"announce-list" => announce_list}), do: {:ok, List.flatten(announce_list)}
 
@@ -132,15 +132,18 @@ defmodule HiveTorrent.Torrent do
   end
 
   defp get_files(_, _name, _download_path) do
-    {:error, :no_files}
+    {:error, "No files found"}
   end
 
   defp get_hashes(hash, num \\ 0, acc \\ %{})
 
-  defp get_hashes("", _num, acc), do: acc
+  defp get_hashes("", _num, acc), do: {:ok, acc}
 
   defp get_hashes(<<hash::bytes-size(20), rest::binary>>, num, acc),
     do: get_hashes(rest, num + 1, Map.put(acc, num, hash))
+
+  defp get_hashes(<<_hash::binary>>, _num, _acc),
+    do: {:error, "Corrupted pieces hash"}
 
   defp file_pieces(files, piece_length, piece_offset \\ 0, piece_num \\ 0, pieces \\ [])
 

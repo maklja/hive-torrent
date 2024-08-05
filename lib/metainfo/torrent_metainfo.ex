@@ -1,3 +1,13 @@
+defmodule HiveTorrent.TorrentError do
+  @moduledoc """
+  Raised when torrent content is invalid.
+  """
+
+  defexception [:message]
+
+  @type t :: %__MODULE__{message: String.t()}
+end
+
 defmodule HiveTorrent.Torrent do
   alias HiveTorrent.Bencode.Serializer
   alias HiveTorrent.Bencode.Parser
@@ -30,17 +40,26 @@ defmodule HiveTorrent.Torrent do
     :info_hash
   ]
 
+  def parse!(torrent_raw_data, opts \\ [download_path: ""]) when is_binary(torrent_raw_data) do
+    case parse(torrent_raw_data, opts) do
+      {:ok, torrent} -> torrent
+      {:error, reason} when is_bitstring(reason) -> raise HiveTorrent.TorrentError, reason
+      {:error, e} when is_exception(e) -> raise e
+    end
+  end
+
   def parse(torrent_raw_data, opts \\ [download_path: ""]) when is_binary(torrent_raw_data) do
+    download_path = Keyword.get(opts, :download_path, "")
+
     with {:ok, torrent_data} <- Parser.parse(torrent_raw_data),
          {:ok, trackers} <- get_trackers(torrent_data),
          {:ok, info} <- get_info(torrent_data),
          {:ok, piece_length} <- get_piece_length(info),
-         {:ok, name} <- Map.fetch(info, "name"),
-         creation_date <- get_creation_date(torrent_data),
-         comment <- Map.get(torrent_data, "comment", ""),
-         created_by <- Map.get(torrent_data, "created by", "") do
-      download_path = Keyword.get(opts, :download_path, "")
-      files = get_files(info, name, download_path)
+         name <- Map.get(info, "name", "torrent_#{DateTime.now!("Etc/UTC")}"),
+         {:ok, files} <- get_files(info, name, download_path) do
+      creation_date = get_creation_date(torrent_data)
+      comment = Map.get(torrent_data, "comment", "")
+      created_by = Map.get(torrent_data, "created by", "")
       files_size = Enum.reduce(files, 0, &(elem(&1, 1) + &2))
       pieces_hashes = get_hashes(Map.get(info, "pieces"))
 
@@ -97,16 +116,23 @@ defmodule HiveTorrent.Torrent do
 
   defp get_trackers(%{"announce" => announce}), do: {:ok, [announce]}
 
-  defp get_trackers(_), do: {:error, :no_trackers}
+  defp get_trackers(_), do: {:error, "No trackers found"}
 
   defp get_files(%{"files" => files}, name, download_path) do
-    Enum.map(files, fn %{"length" => length, "path" => path} ->
-      {Path.join([download_path, name, path]), length}
-    end)
+    processed_files =
+      Enum.map(files, fn %{"length" => length, "path" => path} ->
+        {Path.join([download_path, name, path]), length}
+      end)
+
+    {:ok, processed_files}
   end
 
   defp get_files(%{"length" => length}, name, download_path) do
-    [{Path.join([download_path, name]), length}]
+    {:ok, [{Path.join([download_path, name]), length}]}
+  end
+
+  defp get_files(_, _name, _download_path) do
+    {:error, :no_files}
   end
 
   defp get_hashes(hash, num \\ 0, acc \\ %{})

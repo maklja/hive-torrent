@@ -5,7 +5,7 @@ defmodule HiveTorrent.Bencode.SerializeError do
 
   defexception [:value, :message]
 
-  @type t :: %__MODULE__{value: String.t()}
+  @type t :: %__MODULE__{value: String.t(), message: String.t()}
 
   @impl true
   def message(%{message: message}), do: message

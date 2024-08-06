@@ -10,8 +10,7 @@ end
 
 defmodule HiveTorrent.Torrent do
   @moduledoc """
-  Parse validate and transform torrent content into the struct.
-
+  Parse, validate and transform torrent content into the struct.
 
   ## Struct
 
@@ -37,6 +36,7 @@ defmodule HiveTorrent.Torrent do
 
   alias HiveTorrent.Bencode.Serializer
   alias HiveTorrent.Bencode.Parser
+  alias HiveTorrent.Bencode.SyntaxError
 
   @type t :: %__MODULE__{
           trackers: [String.t(), ...],
@@ -66,16 +66,61 @@ defmodule HiveTorrent.Torrent do
     :info_hash
   ]
 
-  @spec parse!(iodata(), keyword()) :: t() | no_return()
-  def parse!(torrent_raw_data, opts \\ [download_path: ""]) when is_binary(torrent_raw_data) do
-    case parse(torrent_raw_data, opts) do
-      {:ok, torrent} -> torrent
-      {:error, reason} when is_bitstring(reason) -> raise HiveTorrent.TorrentError, reason
-      {:error, e} when is_exception(e) -> raise e
-    end
-  end
+  @doc """
+  Parse, validate and populate HiveTorrent.Torrent struct with torrent data.
 
-  @spec parse(iodata(), keyword()) :: {:ok, t()} | {:error, String.t()}
+  Returns {:ok, result}, otherwise {:error, error}}
+
+  ## Examples
+      iex> torrent_file = %{
+      ...> "announce" => "http://tracker.example.com:8080/announce",
+      ...> "created by" => "Hive torrent",
+      ...> "comment" => "Hive comment",
+      ...> "creation date" => 1_722_686_833,
+      ...> "info" => %{
+      ...>   "length" => 60,
+      ...>   "name" => "example.txt",
+      ...>   "piece length" => 20,
+      ...>   "pieces" => "abcdeabcdeabcdeabcdeabcdeabcdeabcdeabcdeabcdeabcdeabcdeabcde"
+      ...> }
+      ...> }
+      ...> {:ok, torrent_data} = Serializer.encode(torrent_file)
+      ...> Torrent.parse(torrent_data)
+      {:ok, %HiveTorrent.Torrent {
+        comment: "Hive comment",
+        created_by: "Hive torrent",
+        creation_date: ~U[2024-08-03 12:07:13Z],
+        files: [{"example.txt", 60}],
+        info_hash: <<107, 197, 55, 162, 99, 32, 240, 243, 229, 197, 95, 219, 153, 235, 56, 40, 255, 151, 162, 22>>,
+        name: "example.txt",
+        piece_length: 20,
+        pieces: %{
+          0 => [{"abcdeabcdeabcdeabcde", 0, 20, "example.txt"}],
+          1 => [{"abcdeabcdeabcdeabcde", 20, 20, "example.txt"}],
+          2 => [{"abcdeabcdeabcdeabcde", 40, 20, "example.txt"}]
+        },
+        size: 60,
+        trackers: ["http://tracker.example.com:8080/announce"]
+      }}
+
+      iex> torrent_file = %{
+      ...> # missing announce url
+      ...> "created by" => "Hive torrent",
+      ...> "comment" => "Hive comment",
+      ...> "creation date" => 1_722_686_833,
+      ...> "info" => %{
+      ...>   "length" => 60,
+      ...>   "name" => "example.txt",
+      ...>   "piece length" => 20,
+      ...>   "pieces" => "abcdeabcdeabcdeabcdeabcdeabcdeabcdeabcdeabcdeabcdeabcdeabcde"
+      ...> }
+      ...> }
+      ...> {:ok, torrent_data} = Serializer.encode(torrent_file)
+      ...> Torrent.parse(torrent_data)
+      {:error, "No trackers found"}
+  """
+  @spec parse(iodata(), download_path: String.t()) ::
+          {:ok, t()} | {:error, String.t() | SyntaxError.t()}
   def parse(torrent_raw_data, opts \\ [download_path: ""]) when is_binary(torrent_raw_data) do
     download_path = Keyword.get(opts, :download_path, "")
 
@@ -126,6 +171,16 @@ defmodule HiveTorrent.Torrent do
            info_hash: info_hash
          }}
       end
+    end
+  end
+
+  @spec parse!(iodata(), download_path: String.t()) :: t() | no_return()
+  def parse!(torrent_raw_data, opts \\ [download_path: ""]) when is_binary(torrent_raw_data) do
+    case parse(torrent_raw_data, opts) do
+      {:ok, torrent} -> torrent
+      {:error, reason} when is_bitstring(reason) -> raise HiveTorrent.TorrentError, reason
+      {:error, e} when is_exception(e) -> raise e
+      _ -> raise HiveTorrent.TorrentError, "Unknown error"
     end
   end
 

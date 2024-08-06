@@ -301,7 +301,7 @@ defmodule HiveTorrent.TorrentTest do
 
     {:ok, torrent_data} = Serializer.encode(torrent_file)
 
-    expected_message = "Corrupted pieces hash"
+    expected_message = "Number of piece hashes not matching total file size pieces"
     assert Torrent.parse(torrent_data) == {:error, expected_message}
 
     error = catch_error(Torrent.parse!(torrent_data))

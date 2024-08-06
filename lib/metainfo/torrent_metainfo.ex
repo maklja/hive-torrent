@@ -9,6 +9,32 @@ defmodule HiveTorrent.TorrentError do
 end
 
 defmodule HiveTorrent.Torrent do
+  @moduledoc """
+  Parse validate and transform torrent content into the struct.
+
+
+  ## Struct
+
+  The `HiveTorrent.Torrent` struct contains the following fields:
+
+  * `:trackers` - The list of the tracker urls.
+  * `:name` - The name of the torrent.
+  * `:comment` - A description or comment added to the torrent to provide additional context about its content.
+  * `:created_by` - The identifier or name of the user who created the torrent.
+  * `:creation_date` - The date and time when the torrent was created.
+  * `:files` - A list of files included in the torrent. Each file entry contains:
+    - The full path to the file.
+    - The size of the file in bytes.
+  * `:size` - The total size of all files contained within the torrent.
+  * `:piece_length` - The length of a single piece of the torrent, in bytes.
+  * `:pieces` - A map of pieces, where each entry represents a piece of the torrent. The key is the index of the piece, and the value is a map containing:
+    - The hash of the piece.
+    - The byte offset of the piece in the file.
+    - The size of the piece in bytes.
+    - The path of the file containing the piece.
+  * `:info_hash` - The hash of the info section of the torrent, used for identifying the torrent with trackers.
+  """
+
   alias HiveTorrent.Bencode.Serializer
   alias HiveTorrent.Bencode.Parser
 
@@ -40,6 +66,7 @@ defmodule HiveTorrent.Torrent do
     :info_hash
   ]
 
+  @spec parse!(iodata(), keyword()) :: t() | no_return()
   def parse!(torrent_raw_data, opts \\ [download_path: ""]) when is_binary(torrent_raw_data) do
     case parse(torrent_raw_data, opts) do
       {:ok, torrent} -> torrent
@@ -48,6 +75,7 @@ defmodule HiveTorrent.Torrent do
     end
   end
 
+  @spec parse(iodata(), keyword()) :: {:ok, t()} | {:error, String.t()}
   def parse(torrent_raw_data, opts \\ [download_path: ""]) when is_binary(torrent_raw_data) do
     download_path = Keyword.get(opts, :download_path, "")
 
@@ -63,35 +91,41 @@ defmodule HiveTorrent.Torrent do
       created_by = Map.get(torrent_data, "created by", "")
       files_size = Enum.reduce(files, 0, &(elem(&1, 1) + &2))
 
-      pieces_map =
-        files
-        |> file_pieces(piece_length)
-        |> Enum.reduce(Map.new(), fn {piece_num, piece_offset, piece_size, file_path},
-                                     pieces_map ->
-          {:ok, piece_hash} = Map.fetch(pieces_hashes, piece_num)
-          piece_info = {piece_hash, piece_offset, piece_size, file_path}
+      total_number_pieces_hashes = :math.ceil(files_size / piece_length)
 
-          Map.update(pieces_map, piece_num, [piece_info], &[piece_info | &1])
-        end)
-        |> Enum.map(fn {key, value} -> {key, Enum.reverse(value)} end)
-        |> Map.new()
+      if map_size(pieces_hashes) != total_number_pieces_hashes do
+        {:error, "Number of piece hashes not matching total file size pieces"}
+      else
+        pieces_map =
+          files
+          |> file_pieces(piece_length)
+          |> Enum.reduce(Map.new(), fn {piece_num, piece_offset, piece_size, file_path},
+                                       pieces_map ->
+            {:ok, piece_hash} = Map.fetch(pieces_hashes, piece_num)
+            piece_info = {piece_hash, piece_offset, piece_size, file_path}
 
-      {:ok, bencoded_info} = Serializer.encode(info)
-      info_hash = :crypto.hash(:sha, bencoded_info)
+            Map.update(pieces_map, piece_num, [piece_info], &[piece_info | &1])
+          end)
+          |> Enum.map(fn {key, value} -> {key, Enum.reverse(value)} end)
+          |> Map.new()
 
-      {:ok,
-       %__MODULE__{
-         trackers: trackers,
-         name: name,
-         comment: comment,
-         created_by: created_by,
-         creation_date: creation_date,
-         files: files,
-         size: files_size,
-         piece_length: piece_length,
-         pieces: pieces_map,
-         info_hash: info_hash
-       }}
+        {:ok, bencoded_info} = Serializer.encode(info)
+        info_hash = :crypto.hash(:sha, bencoded_info)
+
+        {:ok,
+         %__MODULE__{
+           trackers: trackers,
+           name: name,
+           comment: comment,
+           created_by: created_by,
+           creation_date: creation_date,
+           files: files,
+           size: files_size,
+           piece_length: piece_length,
+           pieces: pieces_map,
+           info_hash: info_hash
+         }}
+      end
     end
   end
 

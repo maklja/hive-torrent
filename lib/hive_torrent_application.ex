@@ -16,7 +16,7 @@ defmodule HiveTorrent.Bencode.Application do
   """
   def start(_type, _args) do
     path = Path.join(:code.priv_dir(:hive_torrent), "example.torrent")
-    {:ok, torrent} = HiveTorrent.Torrent.parse(path)
+    {:ok, torrent} = HiveTorrent.Torrent.parse(File.read!(path))
     IO.inspect(torrent)
   end
 end

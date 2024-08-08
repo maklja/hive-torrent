@@ -1,20 +1,18 @@
 defmodule HiveTorrent.Bencode.SyntaxError do
   defexception [:message]
 
-  @type t(message) :: %HiveTorrent.Bencode.SyntaxError{message: message}
-
-  @type t :: %HiveTorrent.Bencode.SyntaxError{message: String.t()}
+  @type t :: %__MODULE__{message: String.t()}
 
   @impl true
   def exception(:eof) do
     msg = "Unexpected end of the input"
-    %HiveTorrent.Bencode.SyntaxError{message: msg}
+    %__MODULE__{message: msg}
   end
 
   @impl true
   def exception(invalid_token) do
     msg = "Unexpected token '#{invalid_token}' while parsing"
-    %HiveTorrent.Bencode.SyntaxError{message: msg}
+    %__MODULE__{message: msg}
   end
 end
 

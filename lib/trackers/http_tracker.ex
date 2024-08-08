@@ -3,6 +3,8 @@ defmodule HiveTorrent.HTTPTracker do
 
   alias HiveTorrent.Bencode.Parser
 
+  defstruct [:complete, :downloaded, :incomplete, :interval, :min_interval, :peers]
+
   def start_link(tracker_params) when is_map(tracker_params) do
     GenServer.start_link(__MODULE__, tracker_params)
   end
@@ -46,21 +48,16 @@ defmodule HiveTorrent.HTTPTracker do
 
     url = "#{tracker_url}?#{query_params}"
     {:ok, response} = HTTPoison.get(url, [{"Accept", "text/plain"}])
-
-    case response do
-      %HTTPoison.Response{status_code: 200, body: body} -> IO.inspect(response)
-      _ -> IO.inspect("error")
-    end
-
-    # Parser.parse(response.body)
-    # File.write("temp.txt", response.body)
+    %HTTPoison.Response{status_code: 200, body: body} = response
+    {:ok, tracker_state} = Parser.parse(body)
+    parse_peers(tracker_state)
+    IO.inspect(tracker_state)
 
     {:reply, url, state}
   end
 
-  # @impl true
-  # def handle_cast({:push, element}, state) do
-  #   new_state = [element | state]
-  #   {:noreply, new_state}
-  # end
+  defp parse_peers(%{"peers" => peers}) do
+    <<ip::32, _::binary>> = peers
+    IO.inspect(ip)
+  end
 end

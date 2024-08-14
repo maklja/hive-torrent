@@ -51,13 +51,14 @@ defmodule HiveTorrent.HTTPTracker do
     %HTTPoison.Response{status_code: 200, body: body} = response
     {:ok, tracker_state} = Parser.parse(body)
     parse_peers(tracker_state)
-    IO.inspect(tracker_state)
+    # IO.puts(Map.get(tracker_state, "peers"))
 
     {:reply, url, state}
   end
 
+  # <<first_4_bytes::binary-size(4), _rest::binary>> = binary
   defp parse_peers(%{"peers" => peers}) do
-    <<ip::32, _::binary>> = peers
+    <<ip::binary-size(4), _::binary>> = peers
     IO.inspect(ip)
   end
 end

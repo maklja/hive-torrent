@@ -33,5 +33,6 @@ defmodule HiveTorrent.Bencode.Application do
 
     resp = HiveTorrent.HTTPTracker.fetch(pid)
     IO.inspect(resp)
+    IO.inspect(HiveTorrent.HTTPTracker.fetch(pid))
   end
 end

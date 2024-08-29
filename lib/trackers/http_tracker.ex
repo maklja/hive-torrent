@@ -5,7 +5,7 @@ defmodule HiveTorrent.HTTPTracker do
 
   @default_interval 30 * 60
 
-  defstruct [:complete, :downloaded, :incomplete, :interval, :min_interval, :peers]
+  defstruct [:tracker_url, :complete, :downloaded, :incomplete, :interval, :min_interval, :peers]
 
   def start_link(tracker_params) when is_map(tracker_params) do
     GenServer.start_link(__MODULE__, tracker_params)
@@ -28,6 +28,8 @@ defmodule HiveTorrent.HTTPTracker do
   def handle_continue(:fetch_tracker_data, %{tracker_params: tracker_params}) do
     tracker_data = fetch_tracker_data(tracker_params)
 
+    HiveTorrent.TrackerStorage.put(tracker_data)
+
     schedule_fetch(tracker_data)
 
     state = %{
@@ -48,6 +50,8 @@ defmodule HiveTorrent.HTTPTracker do
   def handle_info(:work, state) do
     %{tracker_params: tracker_params} = state
     tracker_data = fetch_tracker_data(tracker_params)
+
+    HiveTorrent.TrackerStorage.put(tracker_data)
 
     schedule_fetch(tracker_data)
 
@@ -106,6 +110,7 @@ defmodule HiveTorrent.HTTPTracker do
       peers = parse_peers(peers_payload)
 
       %__MODULE__{
+        tracker_url: tracker_url,
         complete: complete,
         downloaded: downloaded,
         incomplete: incomplete,

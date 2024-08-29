@@ -1,9 +1,10 @@
-defmodule HiveTorrent.Bencode.Application do
+defmodule HiveTorrent.Application do
   use Application
 
   @moduledoc """
   Documentation for `HiveTorrentApplication`.
   """
+  alias HiveTorrent.TrackerSupervisor
 
   @doc """
   Hello world.
@@ -17,22 +18,24 @@ defmodule HiveTorrent.Bencode.Application do
   def start(_type, _args) do
     path = Path.join(:code.priv_dir(:hive_torrent), "example.torrent")
     {:ok, torrent} = HiveTorrent.Torrent.parse(File.read!(path))
+    {:ok, _pid} = HiveTorrent.Supervisor.start_link(torrent)
 
-    {:ok, pid} =
-      HiveTorrent.HTTPTracker.start_link(%{
-        tracker_url: "http://tracker.files.fm:6969/announce",
+    peer_id = "12345678901234567890"
+
+    Enum.each(torrent.trackers, fn tracker_url ->
+      tracker_params = %{
+        tracker_url: tracker_url,
         info_hash: torrent.info_hash,
-        peer_id: "12345678901234567890",
+        peer_id: peer_id,
         port: 6881,
         uploaded: 0,
         downloaded: 0,
         left: 0,
         compact: 1,
         event: "started"
-      })
+      }
 
-    resp = HiveTorrent.HTTPTracker.fetch(pid)
-    IO.inspect(resp)
-    IO.inspect(HiveTorrent.HTTPTracker.fetch(pid))
+      TrackerSupervisor.start_tracker(tracker_params)
+    end)
   end
 end

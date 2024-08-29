@@ -32,12 +32,7 @@ defmodule HiveTorrent.HTTPTracker do
         {:noreply, tracker_params}
 
       :error ->
-        schedule_fetch(nil)
-
-        {:noreply, tracker_params}
-
-      :fatal_error ->
-        {:stop, :fatal_error, nil}
+        {:stop, "Tracker #{tracker_params.tracker_url} failed with error", nil}
     end
   end
 
@@ -52,11 +47,7 @@ defmodule HiveTorrent.HTTPTracker do
         {:noreply, state}
 
       :error ->
-        schedule_fetch(HiveTorrent.TrackerStorage.get(state.tracker_url))
-        {:noreply, state}
-
-      :fatal_error ->
-        {:stop, :fatal_error, state}
+        {:stop, "Tracker #{state.tracker_url} failed with error", state}
     end
   end
 
@@ -108,39 +99,15 @@ defmodule HiveTorrent.HTTPTracker do
       %HTTPoison.Response{status_code: 200, body: body} ->
         process_tracker_response(tracker_url, body)
 
-      %HTTPoison.Response{status_code: status_code}
-      when status_code in [408, 429, 500, 502, 503, 504] ->
-        Logger.warning(
-          "Received status code #{status_code} from tracker #{tracker_url} that could be retried."
-        )
-
-        :error
-
       %HTTPoison.Response{status_code: status_code} ->
-        Logger.error(
-          "Received status code #{status_code} from tracker #{tracker_url} that is fatal."
-        )
-
-        :fatal_error
+        Logger.error("Received status code #{status_code} from tracker #{tracker_url}.")
+        :error
     end
   end
 
   defp handle_tracker_response({:error, %HTTPoison.Error{reason: reason}}, tracker_url) do
-    case reason do
-      fatal_error when fatal_error in [:nxdomain, :bad_request, :unknown_error] ->
-        Logger.error(
-          "Fatal error #{fatal_error} encountered during communication with tracker #{tracker_url}."
-        )
-
-        :fatal_error
-
-      error ->
-        Logger.warning(
-          "Non fatal error #{error} encountered during communication with tracker #{tracker_url}."
-        )
-
-        :error
-    end
+    Logger.error("Error #{reason} encountered during communication with tracker #{tracker_url}.")
+    :error
   end
 
   defp process_tracker_response(tracker_url, response_body) do

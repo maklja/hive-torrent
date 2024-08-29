@@ -10,8 +10,6 @@ defmodule HiveTorrent.TrackerSupervisor do
           tracker_url: tracker_url
         } = tracker_params
       ) do
-    IO.puts("Test #{tracker_url}")
-
     case URI.parse(tracker_url) do
       %URI{scheme: "http"} ->
         start_http_tracker(tracker_params)

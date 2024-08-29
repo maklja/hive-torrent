@@ -18,7 +18,7 @@ defmodule HiveTorrent.Application do
   def start(_type, _args) do
     path = Path.join(:code.priv_dir(:hive_torrent), "example.torrent")
     {:ok, torrent} = HiveTorrent.Torrent.parse(File.read!(path))
-    {:ok, _pid} = HiveTorrent.Supervisor.start_link(torrent)
+    {:ok, pid} = HiveTorrent.Supervisor.start_link(torrent)
 
     peer_id = "12345678901234567890"
 
@@ -37,5 +37,7 @@ defmodule HiveTorrent.Application do
 
       TrackerSupervisor.start_tracker(tracker_params)
     end)
+
+    {:ok, pid}
   end
 end

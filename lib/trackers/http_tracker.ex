@@ -1,5 +1,7 @@
 defmodule HiveTorrent.HTTPTracker do
-  use GenServer
+  use GenServer, restart: :transient, shutdown: 5_000
+
+  require Logger
 
   alias HiveTorrent.Bencode.Parser
 
@@ -11,51 +13,51 @@ defmodule HiveTorrent.HTTPTracker do
     GenServer.start_link(__MODULE__, tracker_params)
   end
 
-  def fetch(pid) do
-    GenServer.call(pid, :fetch)
-  end
-
   # Callbacks
 
   @impl true
   def init(tracker_params) do
-    state = %{tracker_params: tracker_params, tracker_data: nil}
-
-    {:ok, state, {:continue, :fetch_tracker_data}}
+    {:ok, tracker_params, {:continue, :fetch_tracker_data}}
   end
 
   @impl true
-  def handle_continue(:fetch_tracker_data, %{tracker_params: tracker_params}) do
-    tracker_data = fetch_tracker_data(tracker_params)
+  def handle_continue(:fetch_tracker_data, tracker_params) do
+    tracker_data_response = fetch_tracker_data(tracker_params)
 
-    HiveTorrent.TrackerStorage.put(tracker_data)
+    case tracker_data_response do
+      {:ok, tracker_data} ->
+        HiveTorrent.TrackerStorage.put(tracker_data)
+        schedule_fetch(tracker_data)
 
-    schedule_fetch(tracker_data)
+        {:noreply, tracker_params}
 
-    state = %{
-      tracker_params: tracker_params,
-      tracker_data: tracker_data
-    }
+      :error ->
+        schedule_fetch(nil)
 
-    {:noreply, state}
-  end
+        {:noreply, tracker_params}
 
-  @impl true
-  def handle_call(:fetch, _from, state) do
-    %{tracker_data: tracker_data} = state
-    {:reply, tracker_data, state}
+      :fatal_error ->
+        {:stop, :fatal_error, nil}
+    end
   end
 
   @impl true
   def handle_info(:work, state) do
-    %{tracker_params: tracker_params} = state
-    tracker_data = fetch_tracker_data(tracker_params)
+    tracker_data_response = fetch_tracker_data(state)
 
-    HiveTorrent.TrackerStorage.put(tracker_data)
+    case tracker_data_response do
+      {:ok, tracker_data} ->
+        HiveTorrent.TrackerStorage.put(tracker_data)
+        schedule_fetch(tracker_data)
+        {:noreply, state}
 
-    schedule_fetch(tracker_data)
+      :error ->
+        schedule_fetch(HiveTorrent.TrackerStorage.get(state.tracker_url))
+        {:noreply, state}
 
-    {:noreply, Map.put(state, :tracker_data, tracker_data)}
+      :fatal_error ->
+        {:stop, :fatal_error, state}
+    end
   end
 
   defp schedule_fetch(%{min_interval: min_interval}) do
@@ -96,10 +98,53 @@ defmodule HiveTorrent.HTTPTracker do
       })
 
     url = "#{tracker_url}?#{query_params}"
-    {:ok, response} = HTTPoison.get(url, [{"Accept", "text/plain"}])
-    %HTTPoison.Response{status_code: 200, body: body} = response
+    response = HTTPoison.get(url, [{"Accept", "text/plain"}])
 
-    with {:ok, tracker_state} <- Parser.parse(body),
+    handle_tracker_response(response, tracker_url)
+  end
+
+  defp handle_tracker_response({:ok, response}, tracker_url) do
+    case response do
+      %HTTPoison.Response{status_code: 200, body: body} ->
+        process_tracker_response(tracker_url, body)
+
+      %HTTPoison.Response{status_code: status_code}
+      when status_code in [408, 429, 500, 502, 503, 504] ->
+        Logger.warning(
+          "Received status code #{status_code} from tracker #{tracker_url} that could be retried."
+        )
+
+        :error
+
+      %HTTPoison.Response{status_code: status_code} ->
+        Logger.error(
+          "Received status code #{status_code} from tracker #{tracker_url} that is fatal."
+        )
+
+        :fatal_error
+    end
+  end
+
+  defp handle_tracker_response({:error, %HTTPoison.Error{reason: reason}}, tracker_url) do
+    case reason do
+      fatal_error when fatal_error in [:nxdomain, :bad_request, :unknown_error] ->
+        Logger.error(
+          "Fatal error #{fatal_error} encountered during communication with tracker #{tracker_url}."
+        )
+
+        :fatal_error
+
+      error ->
+        Logger.warning(
+          "Non fatal error #{error} encountered during communication with tracker #{tracker_url}."
+        )
+
+        :error
+    end
+  end
+
+  defp process_tracker_response(tracker_url, response_body) do
+    with {:ok, tracker_state} <- Parser.parse(response_body),
          {:ok, peers_payload} <- Map.fetch(tracker_state, "peers"),
          {:ok, interval} <- Map.fetch(tracker_state, "interval"),
          complete <- Map.get(tracker_state, "complete"),
@@ -109,15 +154,16 @@ defmodule HiveTorrent.HTTPTracker do
       # TODO handle not compact
       peers = parse_peers(peers_payload)
 
-      %__MODULE__{
-        tracker_url: tracker_url,
-        complete: complete,
-        downloaded: downloaded,
-        incomplete: incomplete,
-        interval: interval,
-        min_interval: min_interval,
-        peers: peers
-      }
+      {:ok,
+       %__MODULE__{
+         tracker_url: tracker_url,
+         complete: complete,
+         downloaded: downloaded,
+         incomplete: incomplete,
+         interval: interval,
+         min_interval: min_interval,
+         peers: peers
+       }}
     end
   end
 

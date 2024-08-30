@@ -24,6 +24,8 @@ defmodule HiveTorrent.HTTPTracker do
   def handle_continue(:fetch_tracker_data, tracker_params) do
     tracker_data_response = fetch_tracker_data(tracker_params)
 
+    IO.inspect(tracker_data_response)
+
     case tracker_data_response do
       {:ok, tracker_data} ->
         HiveTorrent.TrackerStorage.put(tracker_data)
@@ -31,8 +33,8 @@ defmodule HiveTorrent.HTTPTracker do
 
         {:noreply, tracker_params}
 
-      :error ->
-        {:stop, "Tracker #{tracker_params.tracker_url} failed with error", nil}
+      {:error, reason} ->
+        {:stop, reason, nil}
     end
   end
 
@@ -46,8 +48,8 @@ defmodule HiveTorrent.HTTPTracker do
         schedule_fetch(tracker_data)
         {:noreply, state}
 
-      :error ->
-        {:stop, "Tracker #{state.tracker_url} failed with error", state}
+      {:error, reason} ->
+        {:stop, reason, state}
     end
   end
 
@@ -76,6 +78,8 @@ defmodule HiveTorrent.HTTPTracker do
       event: event
     } = tracker_params
 
+    Logger.debug("Fetching tracker data #{tracker_url}.")
+
     query_params =
       URI.encode_query(%{
         info_hash: info_hash,
@@ -100,14 +104,12 @@ defmodule HiveTorrent.HTTPTracker do
         process_tracker_response(tracker_url, body)
 
       %HTTPoison.Response{status_code: status_code} ->
-        Logger.error("Received status code #{status_code} from tracker #{tracker_url}.")
-        :error
+        {:error, "Received status code #{status_code} from tracker #{tracker_url}."}
     end
   end
 
   defp handle_tracker_response({:error, %HTTPoison.Error{reason: reason}}, tracker_url) do
-    Logger.error("Error #{reason} encountered during communication with tracker #{tracker_url}.")
-    :error
+    {:error, "Error #{reason} encountered during communication with tracker #{tracker_url}."}
   end
 
   defp process_tracker_response(tracker_url, response_body) do

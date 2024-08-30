@@ -31,6 +31,6 @@ defmodule HiveTorrent.TrackerSupervisor do
 
   @impl true
   def init(_init_args) do
-    DynamicSupervisor.init(strategy: :one_for_one)
+    DynamicSupervisor.init(strategy: :one_for_one, max_restarts: 3, max_seconds: 60)
   end
 end

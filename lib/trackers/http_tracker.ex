@@ -1,11 +1,12 @@
 defmodule HiveTorrent.HTTPTracker do
-  use GenServer, restart: :transient, shutdown: 5_000
+  use GenServer, restart: :transient
 
   require Logger
 
   alias HiveTorrent.Bencode.Parser
 
   @default_interval 30 * 60
+  @default_error_interval 30
 
   defstruct [:tracker_url, :complete, :downloaded, :incomplete, :interval, :min_interval, :peers]
 
@@ -17,24 +18,30 @@ defmodule HiveTorrent.HTTPTracker do
 
   @impl true
   def init(tracker_params) do
+    Logger.info("Started tracker #{tracker_params.tracker_url}")
     {:ok, tracker_params, {:continue, :fetch_tracker_data}}
   end
 
   @impl true
   def handle_continue(:fetch_tracker_data, tracker_params) do
+    Logger.info("Init tracker #{tracker_params.tracker_url}")
     tracker_data_response = fetch_tracker_data(tracker_params)
-
-    IO.inspect(tracker_data_response)
 
     case tracker_data_response do
       {:ok, tracker_data} ->
+        Logger.debug(
+          "Received tracker(#{tracker_params.tracker_url}) data: #{inspect(tracker_data_response)}"
+        )
+
         HiveTorrent.TrackerStorage.put(tracker_data)
         schedule_fetch(tracker_data)
 
         {:noreply, tracker_params}
 
       {:error, reason} ->
-        {:stop, reason, nil}
+        Logger.error(reason)
+        schedule_error_fetch()
+        {:noreply, tracker_params}
     end
   end
 
@@ -44,25 +51,32 @@ defmodule HiveTorrent.HTTPTracker do
 
     case tracker_data_response do
       {:ok, tracker_data} ->
+        Logger.debug(
+          "Received tracker(#{state.tracker_url}) data: #{inspect(tracker_data_response)}"
+        )
+
         HiveTorrent.TrackerStorage.put(tracker_data)
         schedule_fetch(tracker_data)
         {:noreply, state}
 
       {:error, reason} ->
-        {:stop, reason, state}
+        Logger.error(reason)
+        schedule_error_fetch()
+        {:noreply, state}
     end
   end
 
-  defp schedule_fetch(%{min_interval: min_interval}) do
-    Process.send_after(self(), :work, min_interval * 1_000)
+  defp schedule_error_fetch() do
+    Process.send_after(self(), :work, @default_error_interval * 1_000)
   end
 
-  defp schedule_fetch(%{interval: interval}) do
+  defp schedule_fetch(tracker_data) do
+    interval =
+      Map.get(tracker_data, :min_interval) ||
+        Map.get(tracker_data, :interval) ||
+        @default_interval
+
     Process.send_after(self(), :work, interval * 1_000)
-  end
-
-  defp schedule_fetch(_) do
-    Process.send_after(self(), :work, @default_interval * 1_000)
   end
 
   defp fetch_tracker_data(tracker_params) do

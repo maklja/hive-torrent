@@ -4,6 +4,7 @@ defmodule HiveTorrent.HTTPTracker do
   require Logger
 
   alias HiveTorrent.Bencode.Parser
+  alias HiveTorrent.StatsStorage
 
   @default_interval 30 * 60
   @default_error_interval 30
@@ -11,7 +12,7 @@ defmodule HiveTorrent.HTTPTracker do
   defstruct [:tracker_url, :complete, :downloaded, :incomplete, :interval, :min_interval, :peers]
 
   def start_link(tracker_params) when is_map(tracker_params) do
-    GenServer.start_link(__MODULE__, tracker_params)
+    GenServer.start_link(__MODULE__, %{tracker_params | compact: 1})
   end
 
   # Callbacks
@@ -79,18 +80,20 @@ defmodule HiveTorrent.HTTPTracker do
     Process.send_after(self(), :work, interval * 1_000)
   end
 
-  defp fetch_tracker_data(tracker_params) do
-    %{
-      tracker_url: tracker_url,
-      info_hash: info_hash,
-      peer_id: peer_id,
-      port: port,
-      uploaded: uploaded,
-      downloaded: downloaded,
-      left: left,
-      compact: compact,
-      event: event
-    } = tracker_params
+  defp fetch_tracker_data(%{
+         tracker_url: tracker_url,
+         info_hash: info_hash,
+         compact: compact
+       }) do
+    {:ok,
+     %StatsStorage{
+       peer_id: peer_id,
+       port: port,
+       uploaded: uploaded,
+       downloaded: downloaded,
+       left: left,
+       event: event
+     }} = StatsStorage.get(info_hash)
 
     Logger.debug("Fetching tracker data #{tracker_url}.")
 

@@ -5,14 +5,9 @@ defmodule HiveTorrent.Application do
   Documentation for `HiveTorrentApplication`.
   """
   alias HiveTorrent.TrackerSupervisor
+  alias HiveTorrent.StatsStorage
 
   @doc """
-  Hello world.
-
-  ## Examples
-
-      iex> HiveTorrentApplication.hello()
-      :world
 
   """
   def start(_type, _args) do
@@ -22,17 +17,21 @@ defmodule HiveTorrent.Application do
 
     peer_id = "12345678901234567890"
 
+    StatsStorage.put(%StatsStorage{
+      info_hash: torrent.info_hash,
+      peer_id: peer_id,
+      port: 6881,
+      uploaded: 0,
+      downloaded: 0,
+      left: 0,
+      event: "started"
+    })
+
     Enum.each(torrent.trackers, fn tracker_url ->
       tracker_params = %{
         tracker_url: tracker_url,
         info_hash: torrent.info_hash,
-        peer_id: peer_id,
-        port: 6881,
-        uploaded: 0,
-        downloaded: 0,
-        left: 0,
-        compact: 1,
-        event: "started"
+        compact: 1
       }
 
       TrackerSupervisor.start_tracker(tracker_params)

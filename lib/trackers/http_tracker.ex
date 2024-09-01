@@ -9,6 +9,16 @@ defmodule HiveTorrent.HTTPTracker do
   @default_interval 30 * 60
   @default_error_interval 30
 
+  @type t :: %__MODULE__{
+          tracker_url: String.t(),
+          complete: pos_integer(),
+          downloaded: pos_integer(),
+          incomplete: pos_integer(),
+          interval: pos_integer(),
+          min_interval: pos_integer(),
+          peers: binary()
+        }
+
   defstruct [:tracker_url, :complete, :downloaded, :incomplete, :interval, :min_interval, :peers]
 
   def start_link(tracker_params) when is_map(tracker_params) do

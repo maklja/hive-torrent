@@ -3,6 +3,7 @@ defmodule HiveTorrent.HTTPTracker do
 
   require Logger
 
+  alias HiveTorrent.HTTPTracker
   alias HiveTorrent.Bencode.Parser
   alias HiveTorrent.StatsStorage
 
@@ -90,6 +91,7 @@ defmodule HiveTorrent.HTTPTracker do
     Process.send_after(self(), :work, interval * 1_000)
   end
 
+  @spec fetch_tracker_data(map()) :: {:ok, HTTPTracker.t()} | {:error, String.t()}
   defp fetch_tracker_data(%{
          tracker_url: tracker_url,
          info_hash: info_hash,
@@ -160,6 +162,9 @@ defmodule HiveTorrent.HTTPTracker do
          min_interval: min_interval,
          peers: peers
        }}
+    else
+      {:error, _} -> {:error, "Invalid tracker response body"}
+      :error -> {:error, "Invalid tracker response body"}
     end
   end
 

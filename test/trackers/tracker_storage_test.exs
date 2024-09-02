@@ -12,15 +12,15 @@ defmodule HiveTorrent.TrackerStorageTest do
     downloaded: 300,
     interval: 60_000,
     min_interval: 30_000,
-    peers: <<1234>>
+    peers: <<192, 168, 0, 1, 6345>>
   }
 
   setup do
-    tracker_storage = start_supervised!(HiveTorrent.TrackerStorage)
+    start_supervised!(HiveTorrent.TrackerStorage)
 
     HiveTorrent.TrackerStorage.put(@mock)
 
-    %{tracker_storage: tracker_storage}
+    :ok
   end
 
   test "retrieve non existing tracker data" do

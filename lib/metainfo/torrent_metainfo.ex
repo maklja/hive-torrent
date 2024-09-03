@@ -50,7 +50,7 @@ defmodule HiveTorrent.Torrent do
           pieces: %{
             pos_integer() => [{<<_::20>>, pos_integer(), pos_integer(), String.t()}, ...]
           },
-          info_hash: <<_::20>>
+          info_hash: binary()
         }
 
   defstruct [

@@ -3,8 +3,13 @@ defmodule HiveTorrent.StatsStorage do
 
   defstruct [:info_hash, :peer_id, :port, :uploaded, :downloaded, :left, :event]
 
-  def start_link(_opts) do
-    Agent.start_link(fn -> %{} end, name: __MODULE__)
+  def start_link(stats_list \\ []) do
+    stats_map =
+      Enum.reduce(stats_list, %{}, fn torrent_stats, map ->
+        Map.put(map, torrent_stats.info_hash, torrent_stats)
+      end)
+
+    Agent.start_link(fn -> stats_map end, name: __MODULE__)
   end
 
   def get(info_hash) do

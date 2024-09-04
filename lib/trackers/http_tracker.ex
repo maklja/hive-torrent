@@ -17,13 +17,17 @@ defmodule HiveTorrent.HTTPTracker do
           incomplete: pos_integer(),
           interval: pos_integer(),
           min_interval: pos_integer(),
-          peers: binary()
+          peers: %{String.t() => [pos_integer()]}
         }
 
   defstruct [:tracker_url, :complete, :downloaded, :incomplete, :interval, :min_interval, :peers]
 
   def start_link(tracker_params) when is_map(tracker_params) do
-    GenServer.start_link(__MODULE__, %{tracker_params | compact: 1})
+    GenServer.start_link(__MODULE__, Map.put_new(tracker_params, :compact, 1))
+  end
+
+  def get_tracker_info(pid) when is_pid(pid) do
+    GenServer.call(pid, :tracker_info)
   end
 
   # Callbacks
@@ -76,6 +80,11 @@ defmodule HiveTorrent.HTTPTracker do
         schedule_error_fetch()
         {:noreply, state}
     end
+  end
+
+  @impl true
+  def handle_call(:tracker_info, _from, state) do
+    {:reply, state, state}
   end
 
   defp schedule_error_fetch() do
@@ -163,8 +172,7 @@ defmodule HiveTorrent.HTTPTracker do
          peers: peers
        }}
     else
-      {:error, _} -> {:error, "Invalid tracker response body"}
-      :error -> {:error, "Invalid tracker response body"}
+      _unknown_error -> {:error, "Invalid tracker response body"}
     end
   end
 

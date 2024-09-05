@@ -8,7 +8,7 @@ defmodule HiveTorrent.Supervisor do
   @impl true
   def init(_init_args) do
     children = [
-      {HiveTorrent.StatsStorage, nil},
+      {HiveTorrent.StatsStorage, []},
       {HiveTorrent.TrackerStorage, nil},
       {HiveTorrent.TrackerSupervisor, nil}
     ]

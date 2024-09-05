@@ -4,6 +4,7 @@ defmodule HiveTorrent.TrackerStorageTest do
   doctest HiveTorrent.TrackerStorage
 
   alias HiveTorrent.HTTPTracker
+  alias HiveTorrent.TrackerStorage
 
   @mock %HTTPTracker{
     tracker_url: "https://local-tracker.com:333/announce",
@@ -16,19 +17,19 @@ defmodule HiveTorrent.TrackerStorageTest do
   }
 
   setup do
-    start_supervised!(HiveTorrent.TrackerStorage)
+    start_supervised!(TrackerStorage)
 
-    HiveTorrent.TrackerStorage.put(@mock)
+    TrackerStorage.put(@mock)
 
     :ok
   end
 
   test "retrieve non existing tracker data" do
-    assert HiveTorrent.TrackerStorage.get("http://example-tracker.com:8999/announce") === :error
+    assert TrackerStorage.get("http://example-tracker.com:8999/announce") === :error
   end
 
   test "retrieve existing tracker data" do
-    assert HiveTorrent.TrackerStorage.get("https://local-tracker.com:333/announce") ===
+    assert TrackerStorage.get("https://local-tracker.com:333/announce") ===
              {:ok, @mock}
   end
 end

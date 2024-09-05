@@ -106,7 +106,7 @@ defmodule HiveTorrent.StatsStorage do
   Add new torrent stats data.
 
   ## Examples
-      iex> HiveTorrent.StatsStorage.put(%HiveTorrent.StatsTracker{
+      iex> HiveTorrent.StatsStorage.put(%HiveTorrent.StatsStorage{
       ...> info_hash: "12345",
       ...> event: "started",
       ...> peer_id: "3456",

@@ -44,6 +44,9 @@ defmodule HiveTorrent.TrackerStorage do
   """
   @spec get(String.t()) :: :error | {:ok, HTTPTracker.t()}
   def get(tracker_url) do
+    # TODO this should be pair tracker id + info hash?
+    # Because one tracker can be used for multiple torrent files
+    # Fix it later...
     Agent.get(__MODULE__, &Map.fetch(&1, tracker_url))
   end
 

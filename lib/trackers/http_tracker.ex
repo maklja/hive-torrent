@@ -72,25 +72,8 @@ defmodule HiveTorrent.HTTPTracker do
   @impl true
   def handle_continue(:fetch_tracker_data, %{tracker_params: tracker_params} = state) do
     Logger.info("Init tracker #{tracker_params.tracker_url}")
-    tracker_data_response = fetch_tracker_data(tracker_params)
 
-    case tracker_data_response do
-      {:ok, tracker_data} ->
-        Logger.debug(
-          "Received tracker(#{tracker_params.tracker_url}) data: #{inspect(tracker_data_response)}"
-        )
-
-        TrackerStorage.put(tracker_data)
-        schedule_fetch(tracker_data)
-
-        new_state = state |> Map.put(:tracker_data, tracker_data) |> Map.put(:error, nil)
-        {:noreply, new_state}
-
-      {:error, reason} ->
-        Logger.error(reason)
-        schedule_error_fetch()
-        {:noreply, Map.put(state, :error, reason)}
-    end
+    handle_info(:schedule, state)
   end
 
   @impl true

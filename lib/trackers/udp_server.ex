@@ -51,9 +51,29 @@ defmodule HiveTorrent.UDPServer do
   end
 
   @impl true
-  def handle_info({:udp, _socket, ip, port, data}, state) do
+  def handle_info({:udp, socket, ip, port, data}, %{transactions: transactions} = state) do
+    {action, transaction_id} = get_message_header(data)
+    address = format_address(ip, port)
+
+    Logger.info(
+      "Received message on port #{inspect(socket)} with with header (#{map_message_action(action)}, #{transaction_id}) from #{address}"
+    )
+
+    case Map.fetch(transactions, transaction_id) do
+      {:ok, pid} ->
+        Logger.info("Returning response to #{inspect(pid)} received from #{address}")
+
+      :error ->
+        Logger.error("Unknown transaction id #{transaction_id}, dropping message from #{address}")
+    end
+
     IO.puts("Received '#{inspect(data)}' from #{format_ip(ip)}:#{port}")
-    IO.inspect(get_message_header(data))
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_info({:udp_error, socket, :econnreset}, state) do
+    Logger.error("Connection reset when sending message from socket: #{inspect(socket)}")
     {:noreply, state}
   end
 
@@ -64,8 +84,10 @@ defmodule HiveTorrent.UDPServer do
   end
 
   @impl true
-  def terminate(_reason, state) do
-    :gen_udp.close(state)
+  def terminate(_reason, %{
+        socket: socket
+      }) do
+    :gen_udp.close(socket)
   end
 
   defp format_ip({a, b, c, d}), do: "#{a}.#{b}.#{c}.#{d}"
@@ -85,9 +107,7 @@ defmodule HiveTorrent.UDPServer do
   defp get_message_header(<<action::32, transaction_id::32, _rest::binary>>),
     do: {action, transaction_id}
 
-  defp map_message_action(message) when is_binary(message) do
-    <<_skip_64::64, action::32, _rest::binary>> = message
-
+  defp map_message_action(action) when is_integer(action) do
     case action do
       0 -> "connect"
       1 -> "announce"

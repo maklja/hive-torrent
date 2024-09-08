@@ -83,7 +83,7 @@ defmodule HiveTorrent.HTTPTracker do
     case tracker_data_response do
       {:ok, tracker_data} ->
         Logger.debug(
-          "Received tracker(#{state.tracker_url}) data: #{inspect(tracker_data_response)}"
+          "Received tracker(#{tracker_params.tracker_url}) data: #{inspect(tracker_data_response)}"
         )
 
         TrackerStorage.put(tracker_data)

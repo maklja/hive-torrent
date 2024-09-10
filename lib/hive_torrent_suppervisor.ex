@@ -10,6 +10,7 @@ defmodule HiveTorrent.Supervisor do
     children = [
       {HiveTorrent.StatsStorage, []},
       {HiveTorrent.TrackerStorage, nil},
+      {Registry, keys: :duplicate, name: HiveTorrent.TrackerRegistry},
       {HiveTorrent.UDPServer, 6888},
       {HiveTorrent.TrackerSupervisor, nil}
     ]

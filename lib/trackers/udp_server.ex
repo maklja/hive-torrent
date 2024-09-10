@@ -3,7 +3,7 @@ defmodule HiveTorrent.UDPServer do
 
   require Logger
 
-  @udp_protocol_id 0x0000041727101980
+  alias HiveTorrent.UDPTracker
 
   # Client API
 
@@ -11,8 +11,8 @@ defmodule HiveTorrent.UDPServer do
     GenServer.start_link(__MODULE__, port, name: __MODULE__)
   end
 
-  def send_connect_message(pid, ip, port) do
-    GenServer.cast(__MODULE__, {:send_connect, pid, ip, port})
+  def send_message(message, ip, port) do
+    GenServer.cast(__MODULE__, {:send, message, ip, port})
   end
 
   # Server Callbacks
@@ -20,54 +20,46 @@ defmodule HiveTorrent.UDPServer do
   @impl true
   def init(port) do
     {:ok, socket} = :gen_udp.open(port, [:binary, active: true])
-    {:ok, %{socket: socket, transactions: %{}}}
+    {:ok, %{socket: socket}}
   end
 
   @impl true
   def handle_cast(
-        {:send_connect, pid, ip, port},
-        state
+        {:send, message, ip, port},
+        %{
+          socket: socket
+        } = state
       ) do
-    %{
-      socket: socket,
-      transactions: transactions
-    } = state
-
-    case send_connect_request(socket, ip, port) do
-      {:ok, transaction_id} ->
+    case :gen_udp.send(socket, ip, port, message) do
+      :ok ->
         Logger.info("Sent UDP connect message to #{format_address(ip, port)}.")
 
-        updated_transactions = Map.put(transactions, transaction_id, pid)
-        {:noreply, %{state | transactions: updated_transactions}}
+        {:noreply, state}
 
       {:error, reason} ->
         Logger.error(
           "Failed to send UDP connect message to #{format_address(ip, port)} with error #{reason}."
         )
 
-        # TODO send error to the client
+        # TODO publish error
         {:noreply, state}
     end
   end
 
   @impl true
-  def handle_info({:udp, socket, ip, port, data}, %{transactions: transactions} = state) do
-    {action, transaction_id} = get_message_header(data)
+  def handle_info({:udp, socket, ip, port, data}, state) do
     address = format_address(ip, port)
+    Logger.info("Received message on port #{inspect(socket)} from #{address}")
 
-    Logger.info(
-      "Received message on port #{inspect(socket)} with with header (#{map_message_action(action)}, #{transaction_id}) from #{address}"
-    )
+    case UDPTracker.read_message_header(data) do
+      {:ok, action, transaction_id} ->
+        Logger.info("Received message with action #{action} for transaction id #{transaction_id}")
+        broadcast_recv_message(data, address)
 
-    case Map.fetch(transactions, transaction_id) do
-      {:ok, pid} ->
-        Logger.info("Returning response to #{inspect(pid)} received from #{address}")
-
-      :error ->
-        Logger.error("Unknown transaction id #{transaction_id}, dropping message from #{address}")
+      {:error, reason} ->
+        Logger.error("Dropping message, reason #{reason}")
     end
 
-    IO.puts("Received '#{inspect(data)}' from #{format_ip(ip)}:#{port}")
     {:noreply, state}
   end
 
@@ -90,28 +82,19 @@ defmodule HiveTorrent.UDPServer do
     :gen_udp.close(socket)
   end
 
-  defp format_ip({a, b, c, d}), do: "#{a}.#{b}.#{c}.#{d}"
-
   defp format_address({a, b, c, d}, port), do: "#{a}.#{b}.#{c}.#{d}:#{port}"
 
-  defp send_connect_request(socket, ip, port) do
-    transaction_id = :rand.uniform(0xFFFFFFFF)
-    message = <<@udp_protocol_id::64>> <> <<0::32>> <> <<transaction_id::32>>
+  defp broadcast_recv_message(data, transaction_id) do
+    Logger.info("Broadcasting response with transaction id #{transaction_id} to UPD trackers")
 
-    case :gen_udp.send(socket, ip, port, message) do
-      :ok -> {:ok, transaction_id}
-      error -> error
-    end
-  end
+    Registry.dispatch(HiveTorrent.TrackerRegistry, :udp_trackers, fn entries ->
+      for {pid, _} <- entries do
+        Logger.info(
+          "Broadcasting response to #{inspect(pid)} with transaction id #{transaction_id}"
+        )
 
-  defp get_message_header(<<action::32, transaction_id::32, _rest::binary>>),
-    do: {action, transaction_id}
-
-  defp map_message_action(action) when is_integer(action) do
-    case action do
-      0 -> "connect"
-      1 -> "announce"
-      2 -> "scrape"
-    end
+        UDPTracker.broadcast_recv_message(pid, data)
+      end
+    end)
   end
 end

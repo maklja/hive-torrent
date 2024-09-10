@@ -24,7 +24,7 @@ defmodule HiveTorrent.Application do
       uploaded: 0,
       downloaded: 0,
       left: 0,
-      event: "started"
+      completed: []
     })
 
     Enum.each(torrent.trackers, fn tracker_url ->

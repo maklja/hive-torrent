@@ -3,17 +3,18 @@ defmodule HiveTorrent.TrackerStorageTest do
 
   doctest HiveTorrent.TrackerStorage
 
-  alias HiveTorrent.HTTPTracker
+  alias HiveTorrent.Tracker
   alias HiveTorrent.TrackerStorage
 
-  @mock %HTTPTracker{
+  @mock %Tracker{
     tracker_url: "https://local-tracker.com:333/announce",
     complete: 100,
     incomplete: 3,
     downloaded: 300,
     interval: 60_000,
     min_interval: 30_000,
-    peers: <<192, 168, 0, 1, 6345>>
+    peers: <<192, 168, 0, 1, 6345>>,
+    updated_at: DateTime.utc_now()
   }
 
   setup do

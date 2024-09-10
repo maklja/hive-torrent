@@ -5,7 +5,7 @@ defmodule HiveTorrent.TrackerStorage do
 
   use Agent
 
-  alias HiveTorrent.HTTPTracker
+  alias HiveTorrent.Tracker
 
   @spec start_link(any()) :: {:error, {any(), any()}} | {:ok, pid()}
   def start_link(_opts) do
@@ -21,7 +21,7 @@ defmodule HiveTorrent.TrackerStorage do
       iex> HiveTorrent.TrackerStorage.get("http://example.com:333/announce")
       :error
 
-      iex> HiveTorrent.TrackerStorage.put(%HiveTorrent.HTTPTracker{
+      iex> HiveTorrent.TrackerStorage.put(%HiveTorrent.Tracker{
       ...> tracker_url: "https://local-tracker.com:333/announce",
       ...> complete: 100,
       ...> incomplete: 3,
@@ -32,7 +32,7 @@ defmodule HiveTorrent.TrackerStorage do
       ...> })
       :ok
       iex> HiveTorrent.TrackerStorage.get("https://local-tracker.com:333/announce")
-      {:ok, %HiveTorrent.HTTPTracker{
+      {:ok, %HiveTorrent.Tracker{
         tracker_url: "https://local-tracker.com:333/announce",
         complete: 100,
         incomplete: 3,
@@ -42,7 +42,7 @@ defmodule HiveTorrent.TrackerStorage do
         peers: <<1234>>
       }}
   """
-  @spec get(String.t()) :: :error | {:ok, HTTPTracker.t()}
+  @spec get(String.t()) :: :error | {:ok, Tracker.t()}
   def get(tracker_url) do
     # TODO this should be pair tracker id + info hash?
     # Because one tracker can be used for multiple torrent files
@@ -54,7 +54,7 @@ defmodule HiveTorrent.TrackerStorage do
   Add new latest torrent data.
 
   ## Examples
-      iex> HiveTorrent.TrackerStorage.put(%HiveTorrent.HTTPTracker{
+      iex> HiveTorrent.TrackerStorage.put(%HiveTorrent.Tracker{
       ...> tracker_url: "https://local-tracker.com:333/announce",
       ...> complete: 100,
       ...> incomplete: 3,
@@ -65,8 +65,8 @@ defmodule HiveTorrent.TrackerStorage do
       ...> })
       :ok
   """
-  @spec put(HTTPTracker.t()) :: :ok
-  def put(%HTTPTracker{tracker_url: tracker_url} = tracker) do
+  @spec put(Tracker.t()) :: :ok
+  def put(%Tracker{tracker_url: tracker_url} = tracker) do
     Agent.update(__MODULE__, &Map.put(&1, tracker_url, tracker))
   end
 end

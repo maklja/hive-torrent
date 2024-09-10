@@ -17,25 +17,13 @@ defmodule HiveTorrent.HTTPTracker do
 
   require Logger
 
-  alias HiveTorrent.HTTPTracker
+  alias HiveTorrent.Tracker
   alias HiveTorrent.Bencode.Parser
   alias HiveTorrent.StatsStorage
   alias HiveTorrent.TrackerStorage
 
   @default_interval 30 * 60
   @default_error_interval 30
-
-  @type t :: %__MODULE__{
-          tracker_url: String.t(),
-          complete: pos_integer(),
-          downloaded: pos_integer(),
-          incomplete: pos_integer(),
-          interval: pos_integer(),
-          min_interval: pos_integer(),
-          peers: %{String.t() => [pos_integer()]}
-        }
-
-  defstruct [:tracker_url, :complete, :downloaded, :incomplete, :interval, :min_interval, :peers]
 
   @doc """
   Starts the HTTP/HTTPS tracker client.
@@ -63,39 +51,59 @@ defmodule HiveTorrent.HTTPTracker do
   @impl true
   def init(tracker_params) do
     Logger.info("Started tracker #{tracker_params.tracker_url}")
+
     tracker_params = Map.put_new(tracker_params, :compact, 1)
 
-    state = %{tracker_params: tracker_params, tracker_data: nil, error: nil}
-    {:ok, state, {:continue, :fetch_tracker_data}}
+    {:ok, _value} = Registry.register(HiveTorrent.TrackerRegistry, :http_trackers, tracker_params)
+
+    state = %{tracker_params: tracker_params, tracker_data: nil, error: nil, event: ""}
+    {:ok, state, {:continue, :announce}}
   end
 
   @impl true
-  def handle_continue(:fetch_tracker_data, %{tracker_params: tracker_params} = state) do
+  def handle_continue(:announce, %{tracker_params: tracker_params} = state) do
     Logger.info("Init tracker #{tracker_params.tracker_url}")
 
-    handle_info(:schedule, state)
+    handle_info(:schedule_announce, %{state | event: Tracker.started().value})
   end
 
   @impl true
-  def handle_info(:schedule, %{tracker_params: tracker_params} = state) do
-    tracker_data_response = fetch_tracker_data(tracker_params)
+  def handle_info(
+        :schedule_announce,
+        %{tracker_params: tracker_params, event: current_event} = state
+      ) do
+    # TODO handle if the stats are not found in the storage, unknown torrent in this case?
+    {:ok, stats} = StatsStorage.get(tracker_params.info_hash)
+    has_completed_sent = StatsStorage.has_completed?(stats, tracker_params.tracker_url)
+
+    next_event =
+      cond do
+        current_event === Tracker.started().value -> Tracker.started().value
+        has_completed_sent -> Tracker.none().value
+        stats.left == 0 -> Tracker.completed().value
+        true -> Tracker.none().value
+      end
+
+    fetch_params =
+      stats |> Map.from_struct() |> Map.merge(tracker_params) |> Map.put(:event, next_event)
+
+    tracker_data_response = fetch_tracker_data(fetch_params)
 
     case tracker_data_response do
       {:ok, tracker_data} ->
         Logger.debug(
-          "Received tracker(#{tracker_params.tracker_url}) data: #{inspect(tracker_data_response)}"
+          "Received tracker(#{tracker_params.tracker_url}) data: #{inspect(tracker_data)}"
         )
 
         TrackerStorage.put(tracker_data)
         schedule_fetch(tracker_data)
 
-        new_state = state |> Map.put(:tracker_data, tracker_data) |> Map.put(:error, nil)
-        {:noreply, new_state}
+        {:noreply, %{state | tracker_data: tracker_data, error: nil, event: ""}}
 
       {:error, reason} ->
         Logger.error(reason)
         schedule_error_fetch()
-        {:noreply, Map.put(state, :error, reason)}
+        {:noreply, %{state | error: reason}}
     end
   end
 
@@ -104,8 +112,37 @@ defmodule HiveTorrent.HTTPTracker do
     {:reply, state, state}
   end
 
+  @impl true
+  def terminate(_reason, %{tracker_params: tracker_params}) do
+    # TODO test if this is called...
+    Logger.info("Terminating tracker #{tracker_params.tracker_url}")
+
+    # TODO handle if the stats are not found in the storage, unknown torrent in this case?
+    {:ok, stats} = StatsStorage.get(tracker_params.info_hash)
+
+    fetch_params =
+      stats
+      |> Map.from_struct()
+      |> Map.merge(tracker_params)
+      |> Map.put(:event, Tracker.stopped().value)
+
+    tracker_data_response = fetch_tracker_data(fetch_params)
+
+    case tracker_data_response do
+      {:ok, tracker_data} ->
+        Logger.debug(
+          "Received tracker(#{tracker_params.tracker_url}) data: #{inspect(tracker_data)}"
+        )
+
+      {:error, reason} ->
+        Logger.error(reason)
+    end
+
+    :ok
+  end
+
   defp schedule_error_fetch() do
-    Process.send_after(self(), :schedule, @default_error_interval * 1_000)
+    Process.send_after(self(), :schedule_announce, @default_error_interval * 1_000)
   end
 
   defp schedule_fetch(tracker_data) do
@@ -113,26 +150,21 @@ defmodule HiveTorrent.HTTPTracker do
       Map.get(tracker_data, :min_interval) ||
         Map.get(tracker_data, :interval, @default_interval)
 
-    Process.send_after(self(), :schedule, interval * 1_000)
+    Process.send_after(self(), :schedule_announce, interval * 1_000)
   end
 
-  @spec fetch_tracker_data(map()) :: {:ok, HTTPTracker.t()} | {:error, String.t()}
+  @spec fetch_tracker_data(map()) :: {:ok, Tracker.t()} | {:error, String.t()}
   defp fetch_tracker_data(%{
          tracker_url: tracker_url,
          info_hash: info_hash,
-         compact: compact
+         compact: compact,
+         event: event,
+         peer_id: peer_id,
+         port: port,
+         uploaded: uploaded,
+         downloaded: downloaded,
+         left: left
        }) do
-    # TODO handle if the stats are not found in the storage, unknown torrent in this case?
-    {:ok,
-     %StatsStorage{
-       peer_id: peer_id,
-       port: port,
-       uploaded: uploaded,
-       downloaded: downloaded,
-       left: left,
-       event: event
-     }} = StatsStorage.get(info_hash)
-
     Logger.debug("Fetching tracker data #{tracker_url}.")
 
     query_params =
@@ -180,14 +212,15 @@ defmodule HiveTorrent.HTTPTracker do
       peers = parse_peers(peers_payload)
 
       {:ok,
-       %__MODULE__{
+       %Tracker{
          tracker_url: tracker_url,
          complete: complete,
          downloaded: downloaded,
          incomplete: incomplete,
          interval: interval,
          min_interval: min_interval,
-         peers: peers
+         peers: peers,
+         updated_at: DateTime.utc_now()
        }}
     else
       {:error, %HiveTorrent.Bencode.SyntaxError{message: message}} ->

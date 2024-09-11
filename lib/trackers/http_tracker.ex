@@ -72,7 +72,7 @@ defmodule HiveTorrent.HTTPTracker do
         :schedule_announce,
         %{tracker_params: tracker_params, event: current_event} = state
       ) do
-    # TODO handle if the stats are not found in the storage, unknown torrent in this case?
+    # Let it crash in case stats for the torrent are not found, this is then some fatal error
     {:ok, stats} = StatsStorage.get(tracker_params.info_hash)
     has_completed_sent = StatsStorage.has_completed?(stats, tracker_params.tracker_url)
 
@@ -114,10 +114,9 @@ defmodule HiveTorrent.HTTPTracker do
 
   @impl true
   def terminate(_reason, %{tracker_params: tracker_params}) do
-    # TODO test if this is called...
     Logger.info("Terminating tracker #{tracker_params.tracker_url}")
 
-    # TODO handle if the stats are not found in the storage, unknown torrent in this case?
+    # Let it crash in case stats for the torrent are not found, this is then some fatal error
     {:ok, stats} = StatsStorage.get(tracker_params.info_hash)
 
     fetch_params =

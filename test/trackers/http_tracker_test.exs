@@ -22,6 +22,17 @@ defmodule HiveTorrent.HttpTrackerTest do
   }
 
   @mock_updated_date elem(DateTime.from_iso8601("2024-09-10T15:20:30Z"), 1)
+  @tracker_url "https://local-tracker.com:333/announce"
+  @info_hash <<20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0>>
+  @stats %StatsStorage{
+    info_hash: @info_hash,
+    peer_id: "12345678901234567890",
+    port: 6881,
+    uploaded: 0,
+    downloaded: 0,
+    left: 0,
+    completed: []
+  }
 
   setup_with_mocks([
     {DateTime, [:passthrough],
@@ -30,30 +41,15 @@ defmodule HiveTorrent.HttpTrackerTest do
        utc_now: fn _ -> @mock_updated_date end
      ]}
   ]) do
-    info_hash = <<20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0>>
-
     tracker_params = %{
-      tracker_url: "https://local-tracker.com:333/announce",
-      info_hash: info_hash
+      tracker_url: @tracker_url,
+      info_hash: @info_hash
     }
 
     start_supervised!({TrackerStorage, nil})
     start_supervised!({Registry, keys: :duplicate, name: HiveTorrent.TrackerRegistry})
 
-    start_supervised!(
-      {StatsStorage,
-       [
-         %StatsStorage{
-           info_hash: info_hash,
-           peer_id: "12345678901234567890",
-           port: 6881,
-           uploaded: 0,
-           downloaded: 0,
-           left: 0,
-           completed: []
-         }
-       ]}
-    )
+    start_supervised!({StatsStorage, [@stats]})
 
     {:ok, tracker_params}
   end
@@ -79,13 +75,19 @@ defmodule HiveTorrent.HttpTrackerTest do
         {:ok, %HTTPoison.Response{status_code: 200, body: mock_response}}
       end do
       tracker_params = %{tracker_url: tracker_url, info_hash: info_hash, compact: 1}
-      http_tracker_pid = start_supervised!({HTTPTracker, tracker_params})
+      {:ok, http_tracker_pid} = HTTPTracker.start_link(tracker_params)
       tracker_info = HTTPTracker.get_tracker_info(http_tracker_pid)
       assert tracker_info.tracker_params == tracker_params
       assert tracker_info.error == nil
       assert tracker_info.tracker_data == expected_tracker_data
       assert TrackerStorage.get(tracker_url) == {:ok, expected_tracker_data}
       assert Registry.count(HiveTorrent.TrackerRegistry) == 1
+
+      # stop the GenServer in order to invoke terminate callback that should send stop event to tracker
+      GenServer.stop(http_tracker_pid)
+
+      # two calls expected, the first one that is start event and the second one that is stopped event
+      assert_called_exactly(HTTPoison.get(:_, :_), 2)
     end
   end
 

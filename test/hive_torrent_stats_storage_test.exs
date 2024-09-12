@@ -10,6 +10,7 @@ defmodule HiveTorrent.StatsStorageTest do
     peer_id: "3456",
     downloaded: 100,
     left: 8,
+    ip: "192.168.0.23",
     port: 6889,
     uploaded: 1000,
     completed: ["https://local-tracker.com:333/announce"]
@@ -45,15 +46,7 @@ defmodule HiveTorrent.StatsStorageTest do
   end
 
   test "update upload amount stat" do
-    expected_stats = %StatsStorage{
-      info_hash: "56789",
-      peer_id: "3456",
-      downloaded: 100,
-      left: 8,
-      port: 6889,
-      uploaded: 1099,
-      completed: ["https://local-tracker.com:333/announce"]
-    }
+    expected_stats = %{@mock | uploaded: 1099}
 
     assert StatsStorage.uploaded("56789", 99) == :ok
     assert StatsStorage.get("56789") == {:ok, expected_stats}

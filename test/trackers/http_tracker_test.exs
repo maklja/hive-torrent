@@ -59,6 +59,7 @@ defmodule HiveTorrent.HttpTrackerTest do
     info_hash: info_hash
   } do
     expected_tracker_data = %Tracker{
+      info_hash: @info_hash,
       tracker_url: tracker_url,
       complete: 10,
       downloaded: 1496,
@@ -70,7 +71,7 @@ defmodule HiveTorrent.HttpTrackerTest do
     }
 
     with_mock HTTPoison,
-      get: fn tracker_url, _headers ->
+      get: fn _tracker_url, _headers ->
         {:ok, mock_response} = Serializer.encode(@mock)
         {:ok, %HTTPoison.Response{status_code: 200, body: mock_response}}
       end do
@@ -129,7 +130,7 @@ defmodule HiveTorrent.HttpTrackerTest do
       assert tracker_info.tracker_params == tracker_params
 
       assert tracker_info.error ==
-               "Error timeout encountered during communication with tracker https://local-tracker.com:333/announce."
+               "Error timeout encountered during communication with tracker https://local-tracker.com:333/announce with info hash #{inspect(@info_hash)}."
 
       assert tracker_info.tracker_data == nil
       assert TrackerStorage.get(tracker_url) == :error

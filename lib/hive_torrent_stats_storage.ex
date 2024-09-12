@@ -8,6 +8,7 @@ defmodule HiveTorrent.StatsStorage do
   @type t :: %__MODULE__{
           info_hash: binary(),
           peer_id: String.t(),
+          ip: binary() | nil,
           port: pos_integer(),
           uploaded: non_neg_integer(),
           downloaded: non_neg_integer(),
@@ -15,7 +16,7 @@ defmodule HiveTorrent.StatsStorage do
           completed: [String.t()]
         }
 
-  defstruct [:info_hash, :peer_id, :port, :uploaded, :downloaded, :left, :completed]
+  defstruct [:info_hash, :peer_id, :ip, :port, :uploaded, :downloaded, :left, :completed]
 
   def start_link(stats_list \\ []) do
     stats_map =
@@ -35,25 +36,16 @@ defmodule HiveTorrent.StatsStorage do
       iex> HiveTorrent.StatsStorage.get("info_hash")
       :error
 
-      iex> HiveTorrent.StatsStorage.put(%HiveTorrent.StatsStorage{
-      ...> info_hash: "12345",
-      ...> peer_id: "3456",
-      ...> downloaded: 100,
-      ...> left: 8,
-      ...> port: 6889,
-      ...> uploaded: 1000,
-      ...> completed: []
-      ...> })
-      :ok
-      iex> HiveTorrent.StatsStorage.get("12345")
+      iex> HiveTorrent.StatsStorage.get("56789")
       {:ok, %HiveTorrent.StatsStorage{
-        info_hash: "12345",
+        info_hash: "56789",
         peer_id: "3456",
         downloaded: 100,
         left: 8,
+        ip: "192.168.0.23",
         port: 6889,
         uploaded: 1000,
-        completed: []
+        completed: ["https://local-tracker.com:333/announce"]
       }}
   """
   @spec get(binary()) :: {:ok, t()} | :error
@@ -108,6 +100,7 @@ defmodule HiveTorrent.StatsStorage do
       ...> peer_id: "3456",
       ...> downloaded: 100,
       ...> left: 8,
+      ...> ip: "192.168.0.23",
       ...> port: 6889,
       ...> uploaded: 1000,
       ...> completed: []
@@ -121,6 +114,7 @@ defmodule HiveTorrent.StatsStorage do
         peer_id: "3456",
         downloaded: 100,
         left: 8,
+        ip: "192.168.0.23",
         port: 6889,
         uploaded: 1099,
         completed: []

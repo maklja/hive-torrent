@@ -30,8 +30,7 @@ defmodule HiveTorrent.Application do
     Enum.each(torrent.trackers, fn tracker_url ->
       tracker_params = %{
         tracker_url: tracker_url,
-        info_hash: torrent.info_hash,
-        compact: 1
+        info_hash: torrent.info_hash
       }
 
       TrackerSupervisor.start_tracker(tracker_params)

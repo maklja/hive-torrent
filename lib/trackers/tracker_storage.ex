@@ -51,6 +51,27 @@ defmodule HiveTorrent.TrackerStorage do
   end
 
   @doc """
+  Returns all trackers torrent data.
+
+  ## Examples
+      iex> HiveTorrent.TrackerStorage.get_all()
+      [%HiveTorrent.Tracker{
+        tracker_url: "https://local-tracker.com:333/announce",
+        complete: 100,
+        incomplete: 3,
+        downloaded: 300,
+        interval: 60_000,
+        min_interval: 30_000,
+        peers: <<192, 168, 0, 1, 6345>>,
+        updated_at: ~U[2024-09-10 15:20:30Z]
+      }]
+  """
+  @spec get_all() :: [Tracker.t()]
+  def get_all() do
+    Agent.get(__MODULE__, &Map.values(&1))
+  end
+
+  @doc """
   Add new latest torrent data.
 
   ## Examples

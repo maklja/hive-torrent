@@ -75,7 +75,13 @@ defmodule HiveTorrent.HttpTrackerTest do
         {:ok, mock_response} = Serializer.encode(@mock)
         {:ok, %HTTPoison.Response{status_code: 200, body: mock_response}}
       end do
-      tracker_params = %{tracker_url: tracker_url, info_hash: info_hash, compact: 1}
+      tracker_params = %{
+        tracker_url: tracker_url,
+        info_hash: info_hash,
+        compact: 1,
+        num_want: nil
+      }
+
       {:ok, http_tracker_pid} = HTTPTracker.start_link(tracker_params)
       tracker_info = HTTPTracker.get_tracker_info(http_tracker_pid)
       assert tracker_info.tracker_params == tracker_params
@@ -100,7 +106,13 @@ defmodule HiveTorrent.HttpTrackerTest do
       get: fn _tracker_url, _headers ->
         {:ok, %HTTPoison.Response{status_code: 400, body: "Invalid payload received."}}
       end do
-      tracker_params = %{tracker_url: tracker_url, info_hash: info_hash, compact: 1}
+      tracker_params = %{
+        tracker_url: tracker_url,
+        info_hash: info_hash,
+        compact: 1,
+        num_want: nil
+      }
+
       http_tracker_pid = start_supervised!({HTTPTracker, tracker_params})
 
       tracker_info = HTTPTracker.get_tracker_info(http_tracker_pid)
@@ -123,7 +135,13 @@ defmodule HiveTorrent.HttpTrackerTest do
       get: fn _tracker_url, _headers ->
         {:error, %HTTPoison.Error{id: nil, reason: :timeout}}
       end do
-      tracker_params = %{tracker_url: tracker_url, info_hash: info_hash, compact: 1}
+      tracker_params = %{
+        tracker_url: tracker_url,
+        info_hash: info_hash,
+        compact: 1,
+        num_want: nil
+      }
+
       http_tracker_pid = start_supervised!({HTTPTracker, tracker_params})
 
       tracker_info = HTTPTracker.get_tracker_info(http_tracker_pid)
@@ -146,7 +164,13 @@ defmodule HiveTorrent.HttpTrackerTest do
       get: fn _tracker_url, _headers ->
         {:ok, %HTTPoison.Response{status_code: 200, body: "<invalid_payload>"}}
       end do
-      tracker_params = %{tracker_url: tracker_url, info_hash: info_hash, compact: 1}
+      tracker_params = %{
+        tracker_url: tracker_url,
+        info_hash: info_hash,
+        compact: 1,
+        num_want: nil
+      }
+
       http_tracker_pid = start_supervised!({HTTPTracker, tracker_params})
 
       tracker_info = HTTPTracker.get_tracker_info(http_tracker_pid)
@@ -170,7 +194,13 @@ defmodule HiveTorrent.HttpTrackerTest do
         {:ok, mock_response} = Serializer.encode(Map.delete(@mock, "peers"))
         {:ok, %HTTPoison.Response{status_code: 200, body: mock_response}}
       end do
-      tracker_params = %{tracker_url: tracker_url, info_hash: info_hash, compact: 1}
+      tracker_params = %{
+        tracker_url: tracker_url,
+        info_hash: info_hash,
+        compact: 1,
+        num_want: nil
+      }
+
       http_tracker_pid = start_supervised!({HTTPTracker, tracker_params})
 
       tracker_info = HTTPTracker.get_tracker_info(http_tracker_pid)
@@ -191,7 +221,13 @@ defmodule HiveTorrent.HttpTrackerTest do
         {:ok, mock_response} = Serializer.encode(Map.delete(@mock, "interval"))
         {:ok, %HTTPoison.Response{status_code: 200, body: mock_response}}
       end do
-      tracker_params = %{tracker_url: tracker_url, info_hash: info_hash, compact: 1}
+      tracker_params = %{
+        tracker_url: tracker_url,
+        info_hash: info_hash,
+        compact: 1,
+        num_want: nil
+      }
+
       http_tracker_pid = start_supervised!({HTTPTracker, tracker_params})
 
       tracker_info = HTTPTracker.get_tracker_info(http_tracker_pid)

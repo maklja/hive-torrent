@@ -21,16 +21,6 @@ defmodule HiveTorrent.TrackerStorage do
       iex> HiveTorrent.TrackerStorage.get("http://example.com:333/announce")
       :error
 
-      iex> HiveTorrent.TrackerStorage.put(%HiveTorrent.Tracker{
-      ...> tracker_url: "https://local-tracker.com:333/announce",
-      ...> complete: 100,
-      ...> incomplete: 3,
-      ...> downloaded: 300,
-      ...> interval: 60_000,
-      ...> min_interval: 30_000,
-      ...> peers: <<1234>>
-      ...> })
-      :ok
       iex> HiveTorrent.TrackerStorage.get("https://local-tracker.com:333/announce")
       {:ok, %HiveTorrent.Tracker{
         tracker_url: "https://local-tracker.com:333/announce",
@@ -39,7 +29,8 @@ defmodule HiveTorrent.TrackerStorage do
         downloaded: 300,
         interval: 60_000,
         min_interval: 30_000,
-        peers: <<1234>>
+        peers: <<192, 168, 0, 1, 6345>>,
+        updated_at: ~U[2024-09-10 15:20:30Z]
       }}
   """
   @spec get(String.t()) :: :error | {:ok, Tracker.t()}
@@ -84,10 +75,19 @@ defmodule HiveTorrent.TrackerStorage do
       ...> min_interval: 30_000,
       ...> peers: <<1234>>
       ...> })
-      :ok
+      %HiveTorrent.Tracker{
+        tracker_url: "https://local-tracker.com:333/announce",
+        complete: 100,
+        incomplete: 3,
+        downloaded: 300,
+        interval: 60_000,
+        min_interval: 30_000,
+        peers: <<1234>>
+      }
   """
-  @spec put(Tracker.t()) :: :ok
+  @spec put(Tracker.t()) :: Tracker.t()
   def put(%Tracker{tracker_url: tracker_url} = tracker) do
-    Agent.update(__MODULE__, &Map.put(&1, tracker_url, tracker))
+    :ok = Agent.update(__MODULE__, &Map.put(&1, tracker_url, tracker))
+    tracker
   end
 end

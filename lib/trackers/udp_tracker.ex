@@ -196,13 +196,14 @@ defmodule HiveTorrent.UDPTracker do
         updated_at: DateTime.utc_now()
       }
 
-    case TrackerStorage.get(tracker_params.info_hash) do
-      {:ok, %Tracker{peers: old_peers}} ->
-        TrackerStorage.put(%{tracker_data | peers: Map.merge(old_peers, peers)})
+    tracker_data =
+      case TrackerStorage.get(tracker_params.info_hash) do
+        {:ok, %Tracker{peers: old_peers}} ->
+          TrackerStorage.put(%{tracker_data | peers: Map.merge(old_peers, peers)})
 
-      :error ->
-        TrackerStorage.put(tracker_data)
-    end
+        :error ->
+          TrackerStorage.put(tracker_data)
+      end
 
     cancel_scheduled_time(state.timeout_id)
     schedule_fetch(tracker_data)

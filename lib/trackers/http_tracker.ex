@@ -52,7 +52,7 @@ defmodule HiveTorrent.HTTPTracker do
   def init(tracker_params) do
     Logger.info("Started tracker #{tracker_params.tracker_url}")
 
-    tracker_params = Map.put_new(tracker_params, :compact, 1)
+    tracker_params = tracker_params |> Map.put_new(:compact, 1) |> Map.put_new(:num_want, nil)
 
     {:ok, _value} = Registry.register(HiveTorrent.TrackerRegistry, :http_trackers, tracker_params)
 
@@ -176,7 +176,8 @@ defmodule HiveTorrent.HTTPTracker do
          port: port,
          uploaded: uploaded,
          downloaded: downloaded,
-         left: left
+         left: left,
+         num_want: num_want
        }) do
     Logger.debug("Fetching tracker data #{tracker_url}.")
 
@@ -192,7 +193,9 @@ defmodule HiveTorrent.HTTPTracker do
       key: key
     }
 
-    query_params = if ip == nil, do: query_params, else: Map.put(query_params, :ip, ip)
+    query_params = if ip, do: Map.put(query_params, :ip, ip), else: query_params
+
+    query_params = if num_want, do: Map.put(query_params, :numwant, num_want), else: query_params
 
     url = "#{tracker_url}?#{URI.encode_query(query_params)}"
     response = HTTPoison.get(url, [{"Accept", "text/plain"}])

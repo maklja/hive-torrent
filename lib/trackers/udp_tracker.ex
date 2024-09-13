@@ -3,7 +3,6 @@ defmodule HiveTorrent.UDPTracker do
 
   require Logger
 
-  # TODO timeout UDP
   # TODO closed callback
   # TODO scrape
 
@@ -13,6 +12,7 @@ defmodule HiveTorrent.UDPTracker do
 
   @default_interval 30 * 60
   @default_error_interval 30
+  @default_timeout_interval 30
   @udp_protocol_id 0x0000041727101980
   @connect_action 0
   @announce_action 1
@@ -44,6 +44,8 @@ defmodule HiveTorrent.UDPTracker do
   def init(tracker_params) do
     Logger.info("Started tracker #{tracker_params.tracker_url}.")
 
+    tracker_params = tracker_params |> Map.put_new(:num_want, -1)
+
     {:ok, _value} = Registry.register(HiveTorrent.TrackerRegistry, :udp_trackers, tracker_params)
 
     state = %{
@@ -52,8 +54,8 @@ defmodule HiveTorrent.UDPTracker do
       error: nil,
       transaction_id: nil,
       connection_id: nil,
+      timeout_id: nil,
       action: @connect_action,
-      target_action: nil,
       event: Tracker.started().key,
       key: :rand.uniform(0xFFFFFFFF)
     }
@@ -65,7 +67,7 @@ defmodule HiveTorrent.UDPTracker do
   def handle_continue(:announce, %{tracker_params: tracker_params} = state) do
     Logger.info("Init tracker #{tracker_params.tracker_url}")
 
-    handle_info(:schedule_announce, %{state | event: Tracker.started().key})
+    handle_info(:schedule_announce, state)
   end
 
   @impl true
@@ -73,13 +75,15 @@ defmodule HiveTorrent.UDPTracker do
     case url_to_inet_address(tracker_params.tracker_url) do
       {:ok, ip, port} ->
         transaction_id = send_message(ip, port, state)
+        timeout_id = schedule_timeout()
 
         Logger.info("Sent message with transaction id #{format_transaction_id(transaction_id)}.")
 
         {:noreply,
          %{
            state
-           | transaction_id: transaction_id
+           | transaction_id: transaction_id,
+             timeout_id: timeout_id
          }}
 
       {:fatal_error, message} ->
@@ -92,6 +96,28 @@ defmodule HiveTorrent.UDPTracker do
 
         {:noreply, state}
     end
+  end
+
+  @impl true
+  def handle_info(
+        :timeout,
+        %{transaction_id: transaction_id, tracker_params: tracker_params} = state
+      ) do
+    Logger.warning(
+      "Connection timeout #{tracker_params.tracker_url} for transaction #{transaction_id}."
+    )
+
+    Process.send(self(), :schedule_announce, [:noconnect])
+
+    {:noreply,
+     %{
+       state
+       | action: @connect_action,
+         transaction_id: nil,
+         error: nil,
+         connection_id: nil,
+         timeout_id: nil
+     }}
   end
 
   @impl true
@@ -114,7 +140,17 @@ defmodule HiveTorrent.UDPTracker do
           "Received message with correct transaction id #{format_transaction_id(transaction_id)} but invalid actions. Expected action #{action}, received action #{msg_action}."
         )
 
-        {:noreply, state}
+        cancel_scheduled_time(state.timeout_id)
+        schedule_fetch(state.tracker_data)
+
+        {:noreply,
+         %{
+           state
+           | action: @connect_action,
+             timeout_id: nil,
+             transaction_id: nil,
+             connection_id: nil
+         }}
 
       true ->
         Logger.info(
@@ -128,12 +164,15 @@ defmodule HiveTorrent.UDPTracker do
   defp process_message(@connect_action, <<connection_id::64, _rest::binary>>, state) do
     Process.send(self(), :schedule_announce, [:noconnect])
 
+    cancel_scheduled_time(state.timeout_id)
+
     %{
       state
       | connection_id: connection_id,
         action: @announce_action,
         error: nil,
-        transaction_id: nil
+        transaction_id: nil,
+        timeout_id: nil
     }
   end
 
@@ -157,7 +196,15 @@ defmodule HiveTorrent.UDPTracker do
         updated_at: DateTime.utc_now()
       }
 
-    TrackerStorage.put(tracker_data)
+    case TrackerStorage.get(tracker_params.info_hash) do
+      {:ok, %Tracker{peers: old_peers}} ->
+        TrackerStorage.put(%{tracker_data | peers: Map.merge(old_peers, peers)})
+
+      :error ->
+        TrackerStorage.put(tracker_data)
+    end
+
+    cancel_scheduled_time(state.timeout_id)
     schedule_fetch(tracker_data)
 
     %{
@@ -165,15 +212,17 @@ defmodule HiveTorrent.UDPTracker do
       | tracker_data: tracker_data,
         connection_id: nil,
         action: @connect_action,
+        event: Tracker.none().key,
         error: nil,
         transaction_id: nil,
-        event: Tracker.none().key
+        timeout_id: nil
     }
   end
 
   defp process_message(@error_action, message, state) do
     Logger.error("Received error action with the message #{message}.")
 
+    cancel_scheduled_time(state.timeout_id)
     schedule_fetch(state.tracker_data)
 
     %{
@@ -181,7 +230,8 @@ defmodule HiveTorrent.UDPTracker do
       | connection_id: nil,
         action: @connect_action,
         error: message,
-        transaction_id: nil
+        transaction_id: nil,
+        timeout_id: nil
     }
   end
 
@@ -210,9 +260,14 @@ defmodule HiveTorrent.UDPTracker do
   defp send_announce_message(
          ip,
          port,
-         %{tracker_params: tracker_params, event: event, connection_id: connection_id, key: key}
+         %{
+           tracker_params: tracker_params,
+           event: event,
+           connection_id: connection_id,
+           key: key
+         }
        ) do
-    %{info_hash: info_hash, tracker_url: tracker_url} = tracker_params
+    %{info_hash: info_hash, tracker_url: tracker_url, num_want: num_want} = tracker_params
 
     {:ok, stats} = StatsStorage.get(info_hash)
 
@@ -229,7 +284,7 @@ defmodule HiveTorrent.UDPTracker do
 
     next_event =
       cond do
-        event === Tracker.started().key -> Tracker.started().key
+        event in [Tracker.started().key, Tracker.stopped().key] -> event
         has_completed_sent -> Tracker.none().key
         stats.left == 0 -> Tracker.completed().key
         true -> Tracker.none().key
@@ -241,8 +296,6 @@ defmodule HiveTorrent.UDPTracker do
 
     # if nil set 0 as default value
     peer_ip = peer_ip || 0
-    # TODO move to config of tracker
-    num_want = -1
     transaction_id = :rand.uniform(0xFFFFFFFF)
 
     announce_message =
@@ -252,6 +305,14 @@ defmodule HiveTorrent.UDPTracker do
 
     HiveTorrent.UDPServer.send_message(announce_message, ip, port)
     transaction_id
+  end
+
+  defp schedule_timeout() do
+    Process.send_after(self(), :timeout, @default_timeout_interval * 1_000)
+  end
+
+  defp cancel_scheduled_time(timeout_ref) when is_reference(timeout_ref) do
+    Process.cancel_timer(timeout_ref)
   end
 
   defp schedule_fetch(nil) do

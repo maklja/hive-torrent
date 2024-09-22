@@ -5,6 +5,12 @@ defmodule HiveTorrent.UDPServer do
 
   alias HiveTorrent.UDPTracker
 
+  @udp_protocol_id 0x0000041727101980
+  @connect_action 0
+  @announce_action 1
+  @scrape_action 2
+  @error_action 3
+
   # Client API
 
   def start_link(port) when is_integer(port) do
@@ -20,48 +26,94 @@ defmodule HiveTorrent.UDPServer do
   @impl true
   def init(port) do
     {:ok, socket} = :gen_udp.open(port, [:binary, active: true])
-    {:ok, %{socket: socket}}
+    {:ok, %{socket: socket, requests: %{}}}
   end
 
   @impl true
-  def handle_cast(
-        {:send, message, ip, port},
-        %{
-          socket: socket
-        } = state
+  def handle_call({:send_announce, message_chunk, ip, port}, _from, state) do
+    transaction_id = :rand.uniform(0xFFFFFFFF)
+
+    transaction_data = %{
+      id: transaction_id,
+      action: @connect_action,
+      target_action: @announce_action,
+      message: message_chunk,
+      ip: ip,
+      port: port,
+      connection_id: nil
+    }
+
+    updated_requests =
+      Map.put(
+        state.requests,
+        transaction_id,
+        transaction_data
+      )
+
+    new_state = %{state | requests: updated_requests}
+
+    Process.send(self(), {:send_request, transaction_id}, [:noconnect])
+
+    {:reply, transaction_id, new_state}
+  end
+
+  @impl true
+  def handle_info(
+        {:send_request, transaction_id},
+        %{requests: requests, socket: socket} = state
       ) do
-    case :gen_udp.send(socket, ip, port, message) do
-      :ok ->
-        Logger.info("Sent UDP connect message to #{format_address(ip, port)}.")
-
-        {:noreply, state}
-
+    with {:ok, %{ip: ip, port: port} = transaction_data} <-
+           Map.fetch(requests, transaction_id),
+         {:ok, message} <- create_message(transaction_data),
+         :ok <- :gen_udp.send(socket, ip, port, message) do
+      Logger.info("Sent UDP connect message to #{format_address(ip, port)}.")
+    else
       {:error, reason} ->
         Logger.error(
-          "Failed to send UDP connect message to #{format_address(ip, port)} with error #{reason}."
+          "Failed to send UDP connect message for transaction #{transaction_id}, reason #{reason}, data #{inspect(Map.get(requests, transaction_id))}."
         )
 
-        # TODO publish error
-        {:noreply, state}
+        # TODO broadcast that transaction data is missing in case some tracker is waiting
+        {:noreply, %{state | requests: Map.delete(requests, transaction_id)}}
+
+      _ ->
+        Logger.error(
+          "Failed to send UDP connect message for transaction #{transaction_id}, data #{inspect(Map.get(requests, transaction_id))}."
+        )
+
+        # TODO broadcast that transaction data is missing in case some tracker is waiting
+        {:noreply, %{state | requests: Map.delete(requests, transaction_id)}}
     end
   end
 
   @impl true
-  def handle_info({:udp, socket, ip, port, data}, state) do
+  def handle_info({:udp, socket, ip, port, data}, %{requests: requests} = state) do
     address = format_address(ip, port)
     Logger.info("Received message on port #{inspect(socket)} from #{address}.")
 
-    case UDPTracker.read_message_header(data) do
-      {:ok, action, transaction_id} ->
+    case parse_message(state, data) do
+      {:ok, action, transaction_data, message_body} ->
         Logger.info(
-          "Received message with action #{action} for transaction id #{transaction_id}."
+          "Received message with action #{action} for transaction id #{transaction_data.id}."
         )
 
-        broadcast_recv_message(data, address)
+        handle_result =
+          handle_recv_message(
+            action,
+            transaction_data,
+            message_body
+          )
 
       {:error, reason} ->
-        Logger.error("Dropping message, reason #{reason}.")
+        {:error, "Dropping message, reason #{reason}."}
     end
+
+    # case response do
+    #   {:error, reason} ->
+    #     Logger.error(reason)
+    #     # TODO broadcast the error message
+    #     {:noreply, %{state | requests: Map.delete(requests, tra)}}
+    # end
 
     {:noreply, state}
   end
@@ -78,6 +130,105 @@ defmodule HiveTorrent.UDPServer do
       }) do
     :gen_udp.close(socket)
   end
+
+  defp handle_recv_message(recv_action, transaction_data, message_body) do
+    %{id: transaction_id, action: action, target_action: target_action} = transaction_data
+
+    cond do
+      recv_action === @error_action ->
+        {
+          :error,
+          "Received error response for transaction #{format_transaction_id(transaction_id)}, reason #{message_body}."
+        }
+
+      recv_action !== action ->
+        {:error,
+         "Requested action #{action} is not matched with received action #{recv_action} for transaction #{format_transaction_id(transaction_id)}."}
+
+      action === @connect_action ->
+        <<connection_id::64>> = message_body
+
+        {:cont, %{transaction_data | action: target_action, connection_id: connection_id}}
+
+      action === @announce_action ->
+        {:done, message_body}
+
+      true ->
+        # this shouldn't happen ever
+        {:fatal_error, "Process unsupported action #{recv_action}."}
+    end
+  end
+
+  defp handle_next_action({:fatal_error, reason}, state, _transaction_id) do
+    Logger.critical(reason)
+    # TODO broadcast the error message
+    {:stop, {:error, reason}, state}
+  end
+
+  defp handle_next_action({:error, reason}, state, transaction_id) do
+    Logger.error(reason)
+    # TODO broadcast the error message
+    {:noreply, %{state | requests: Map.delete(state.requests, transaction_id)}}
+  end
+
+  defp handle_next_action({:done, message}, state, transaction_id) do
+    # LOG
+    # TODO broadcast the message
+    {:noreply, %{state | requests: Map.delete(state.requests, transaction_id)}}
+  end
+
+  defp handle_next_action({:cont, transaction_data}, state, transaction_id) do
+    # TODO broadcast the message
+    {:noreply, %{state | requests: Map.delete(state.requests, transaction_id)}}
+  end
+
+  defp parse_message(
+         %{requests: requests},
+         <<action::32, transaction_id::32, message_body::binary>>
+       ) do
+    case Map.fetch(requests, transaction_id) do
+      {:ok, transaction_data} ->
+        {:ok, action, transaction_data, message_body}
+
+      :error ->
+        {:error,
+         "Transaction data not found for transaction with id #{format_transaction_id(transaction_id)}."}
+    end
+  end
+
+  defp parse_message(_state, _message_resp) do
+    {:error, "Invalid message format received."}
+  end
+
+  defp create_message(%{action: @connect_action, transaction_id: transaction_id}) do
+    {:ok, <<@udp_protocol_id::64, @connect_action::32, transaction_id::32>>}
+  end
+
+  defp create_message(%{
+         action: @announce_action,
+         transaction_id: transaction_id,
+         connection_id: connection_id,
+         message: message
+       }) do
+    {:ok, <<connection_id::64, @announce_action::32, transaction_id::32>> <> message}
+  end
+
+  defp create_message(invalid_transaction_data) do
+    {:error, "Unsupported transaction data structure #{inspect(invalid_transaction_data)}."}
+  end
+
+  defp map_message_action(action) do
+    case action do
+      @connect_action -> {:ok, "connect"}
+      @announce_action -> {:ok, "announce"}
+      @scrape_action -> {:ok, "scrape"}
+      @error_action -> {:ok, "error"}
+      val -> {:error, "Invalid value for action #{val}"}
+    end
+  end
+
+  defp format_transaction_id(transaction_id) when is_integer(transaction_id),
+    do: Integer.to_string(transaction_id, 16)
 
   defp format_address({a, b, c, d}, port), do: "#{a}.#{b}.#{c}.#{d}:#{port}"
 

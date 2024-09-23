@@ -1,21 +1,27 @@
-# HiveTorrentApplication
+# Hive Torrent
 
-**TODO: Add description**
+Hive Torrent is a project created for learning the Elixir programming language. This repository is intended for educational purposes and is still under development. This project implements the BitTorrent protocol using the Elixir programming language.
+
+## Table of Contents
+
+- [Description](#description)
+- [Installation](#installation)
+- [License](#license)
+
+## Description
+
+Hive Torrent is designed to explore and practice various concepts in Elixir. The project may include features related to torrent file management, peer-to-peer sharing, or other functionalities as learning progresses.
 
 ## Installation
 
-If [available in Hex](https://hex.pm/docs/publish), the package can be installed
-by adding `hive_torrent` to your list of dependencies in `mix.exs`:
+To get started with Hive Torrent, clone the repository and install the necessary dependencies:
 
-```elixir
-def deps do
-  [
-    {:hive_torrent, "~> 0.1.0"}
-  ]
-end
+```bash
+git clone https://github.com/maklja/hive-torrent
+cd hive-torrent
+mix deps.get
 ```
 
-Documentation can be generated with [ExDoc](https://github.com/elixir-lang/ex_doc)
-and published on [HexDocs](https://hexdocs.pm). Once published, the docs can
-be found at <https://hexdocs.pm/hive_torrent>.
+## License
 
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.

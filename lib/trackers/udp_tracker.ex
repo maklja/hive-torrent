@@ -13,25 +13,14 @@ defmodule HiveTorrent.UDPTracker do
   @default_interval 30 * 60
   @default_error_interval 30
   @default_timeout_interval 30
-  @udp_protocol_id 0x0000041727101980
-  @connect_action 0
-  @announce_action 1
-  # @scrape_action 2
-  @error_action 3
 
-  def broadcast_recv_message(pid, message) do
-    GenServer.cast(pid, {:broadcast, message})
+  def broadcast_announce_message(pid, transaction_id, message) do
+    GenServer.cast(pid, {:broadcast_announce, transaction_id, message})
   end
 
-  def read_message_header(<<action::32, transaction_id::32, _rest::binary>>) do
-    with {:ok, action_value} <- map_message_action(action),
-         formatted_trans_id <- format_transaction_id(transaction_id) do
-      {:ok, action_value, formatted_trans_id}
-    end
-  end
-
-  def read_message_header(_message_resp) do
-    {:error, "Invalid message format received."}
+  def broadcast_scrape_message(_pid, _transaction_id, _message) do
+    # GenServer.cast(pid, {:broadcast_announce, transaction_id, message})
+    :ok
   end
 
   def start_link(tracker_params) when is_map(tracker_params) do
@@ -51,11 +40,9 @@ defmodule HiveTorrent.UDPTracker do
     state = %{
       tracker_params: tracker_params,
       tracker_data: nil,
-      error: nil,
       transaction_id: nil,
-      connection_id: nil,
+      error: nil,
       timeout_id: nil,
-      action: @connect_action,
       event: Tracker.started().key,
       key: :rand.uniform(0xFFFFFFFF)
     }
@@ -74,10 +61,12 @@ defmodule HiveTorrent.UDPTracker do
   def handle_info(:schedule_announce, %{tracker_params: tracker_params} = state) do
     case url_to_inet_address(tracker_params.tracker_url) do
       {:ok, ip, port} ->
-        transaction_id = send_message(ip, port, state)
+        transaction_id = send_announce_message(ip, port, state)
         timeout_id = schedule_timeout()
 
-        Logger.info("Sent message with transaction id #{format_transaction_id(transaction_id)}.")
+        Logger.info(
+          "Sent message with transaction id #{Tracker.format_transaction_id(transaction_id)}."
+        )
 
         {:noreply,
          %{
@@ -104,7 +93,7 @@ defmodule HiveTorrent.UDPTracker do
         %{transaction_id: transaction_id, tracker_params: tracker_params} = state
       ) do
     Logger.warning(
-      "Connection timeout #{tracker_params.tracker_url} for transaction #{transaction_id}."
+      "Connection timeout #{tracker_params.tracker_url} for transaction #{Tracker.format_transaction_id(transaction_id)}."
     )
 
     Process.send(self(), :schedule_announce, [:noconnect])
@@ -112,72 +101,32 @@ defmodule HiveTorrent.UDPTracker do
     {:noreply,
      %{
        state
-       | action: @connect_action,
-         transaction_id: nil,
+       | transaction_id: nil,
          error: nil,
-         connection_id: nil,
          timeout_id: nil
      }}
   end
 
   @impl true
   def handle_cast(
-        {:broadcast, message},
+        {:broadcast_announce, msg_transaction_id, message},
         %{
-          transaction_id: transaction_id,
-          action: action
+          transaction_id: transaction_id
         } = state
       ) do
-    <<msg_action::32, msg_transaction_id::32, rest::binary>> = message
+    if transaction_id !== msg_transaction_id do
+      Logger.debug("Transaction ids do not match, skipping message processing.")
+      {:noreply, state}
+    else
+      Logger.info(
+        "Start processing of the message received with transaction id #{transaction_id}."
+      )
 
-    cond do
-      transaction_id !== msg_transaction_id ->
-        Logger.debug("Transaction ids do not match, skipping message processing.")
-        {:noreply, state}
-
-      action !== msg_action and msg_action !== @error_action ->
-        Logger.error(
-          "Received message with correct transaction id #{format_transaction_id(transaction_id)} but invalid actions. Expected action #{action}, received action #{msg_action}."
-        )
-
-        cancel_scheduled_time(state.timeout_id)
-        schedule_fetch(state.tracker_data)
-
-        {:noreply,
-         %{
-           state
-           | action: @connect_action,
-             timeout_id: nil,
-             transaction_id: nil,
-             connection_id: nil
-         }}
-
-      true ->
-        Logger.info(
-          "Start processing of the message received with transaction id #{transaction_id}."
-        )
-
-        {:noreply, process_message(msg_action, rest, state)}
+      {:noreply, process_announce_message(message, state)}
     end
   end
 
-  defp process_message(@connect_action, <<connection_id::64, _rest::binary>>, state) do
-    Process.send(self(), :schedule_announce, [:noconnect])
-
-    cancel_scheduled_time(state.timeout_id)
-
-    %{
-      state
-      | connection_id: connection_id,
-        action: @announce_action,
-        error: nil,
-        transaction_id: nil,
-        timeout_id: nil
-    }
-  end
-
-  defp process_message(
-         @announce_action,
+  defp process_announce_message(
          <<interval::32, leechers::32, seeders::32, address_list::binary>>,
          %{tracker_params: tracker_params} = state
        ) do
@@ -211,51 +160,11 @@ defmodule HiveTorrent.UDPTracker do
     %{
       state
       | tracker_data: tracker_data,
-        connection_id: nil,
-        action: @connect_action,
         event: Tracker.none().key,
         error: nil,
         transaction_id: nil,
         timeout_id: nil
     }
-  end
-
-  defp process_message(@error_action, message, state) do
-    Logger.error("Received error action with the message #{message}.")
-
-    cancel_scheduled_time(state.timeout_id)
-    schedule_fetch(state.tracker_data)
-
-    %{
-      state
-      | connection_id: nil,
-        action: @connect_action,
-        error: message,
-        transaction_id: nil,
-        timeout_id: nil
-    }
-  end
-
-  defp send_message(ip, port, %{action: action, tracker_params: tracker_params} = state) do
-    case action do
-      @connect_action ->
-        Logger.info("Sent connect message from tracker #{tracker_params.tracker_url}.")
-        send_connect_message(ip, port)
-
-      @announce_action ->
-        Logger.info("Sent announce message from tracker #{tracker_params.tracker_url}.")
-        send_announce_message(ip, port, state)
-    end
-  end
-
-  defp send_connect_message(ip, port) do
-    transaction_id = :rand.uniform(0xFFFFFFFF)
-
-    connect_message =
-      <<@udp_protocol_id::64, @connect_action::32, transaction_id::32>>
-
-    HiveTorrent.UDPServer.send_message(connect_message, ip, port)
-    transaction_id
   end
 
   defp send_announce_message(
@@ -264,10 +173,10 @@ defmodule HiveTorrent.UDPTracker do
          %{
            tracker_params: tracker_params,
            event: event,
-           connection_id: connection_id,
            key: key
          }
        ) do
+    Logger.info("Sent announce message from tracker #{tracker_params.tracker_url}.")
     %{info_hash: info_hash, tracker_url: tracker_url, num_want: num_want} = tracker_params
 
     {:ok, stats} = StatsStorage.get(info_hash)
@@ -297,15 +206,12 @@ defmodule HiveTorrent.UDPTracker do
 
     # if nil set 0 as default value
     peer_ip = peer_ip || 0
-    transaction_id = :rand.uniform(0xFFFFFFFF)
 
     announce_message =
-      <<connection_id::64, @announce_action::32, transaction_id::32, info_hash::binary,
-        peer_id::binary, downloaded::64, left::64, uploaded::64, next_event::32, peer_ip::32,
-        key::32, num_want::32, peer_port::16>>
+      <<info_hash::binary, peer_id::binary, downloaded::64, left::64, uploaded::64,
+        next_event::32, peer_ip::32, key::32, num_want::32, peer_port::16>>
 
-    HiveTorrent.UDPServer.send_message(announce_message, ip, port)
-    transaction_id
+    HiveTorrent.UDPServer.send_announce_message(announce_message, ip, port)
   end
 
   defp schedule_timeout() do
@@ -361,17 +267,4 @@ defmodule HiveTorrent.UDPTracker do
         {:error, "Failed to resolve hostname, reason #{reason} with tracker #{hostname}"}
     end
   end
-
-  defp map_message_action(action) do
-    case action do
-      0 -> {:ok, "connect"}
-      1 -> {:ok, "announce"}
-      2 -> {:ok, "scrape"}
-      3 -> {:ok, "error"}
-      val -> {:error, "Invalid value for action #{val}"}
-    end
-  end
-
-  defp format_transaction_id(transaction_id) when is_integer(transaction_id),
-    do: Integer.to_string(transaction_id, 16)
 end

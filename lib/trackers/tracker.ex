@@ -53,6 +53,9 @@ defmodule HiveTorrent.Tracker do
     parse_IPv4_peers(peers_binary_payload)
   end
 
+  def format_transaction_id(transaction_id) when is_integer(transaction_id),
+    do: Integer.to_string(transaction_id, 16)
+
   defp parse_IPv4_peers(
          peers_binary_payload,
          peers \\ []

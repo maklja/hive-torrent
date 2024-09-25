@@ -3,6 +3,7 @@ defmodule HiveTorrent.UDPServer do
 
   require Logger
 
+  alias HiveTorrent.Tracker
   alias HiveTorrent.UDPTracker
 
   @udp_protocol_id 0x0000041727101980
@@ -17,8 +18,8 @@ defmodule HiveTorrent.UDPServer do
     GenServer.start_link(__MODULE__, port, name: __MODULE__)
   end
 
-  def send_message(message, ip, port) do
-    GenServer.cast(__MODULE__, {:send, message, ip, port})
+  def send_announce_message(message, ip, port) do
+    GenServer.call(__MODULE__, {:send_announce, message, ip, port})
   end
 
   # Server Callbacks
@@ -87,7 +88,7 @@ defmodule HiveTorrent.UDPServer do
   end
 
   @impl true
-  def handle_info({:udp, socket, ip, port, data}, %{requests: requests} = state) do
+  def handle_info({:udp, socket, ip, port, data}, state) do
     address = format_address(ip, port)
     Logger.info("Received message on port #{inspect(socket)} from #{address}.")
 
@@ -97,25 +98,19 @@ defmodule HiveTorrent.UDPServer do
           "Received message with action #{action} for transaction id #{transaction_data.id}."
         )
 
-        handle_result =
+        parsed_message =
           handle_recv_message(
             action,
             transaction_data,
             message_body
           )
 
+        handle_next_action(parsed_message, state)
+
       {:error, reason} ->
-        {:error, "Dropping message, reason #{reason}."}
+        Logger.error("Dropping message, reason #{reason}.")
+        {:noreply, state}
     end
-
-    # case response do
-    #   {:error, reason} ->
-    #     Logger.error(reason)
-    #     # TODO broadcast the error message
-    #     {:noreply, %{state | requests: Map.delete(requests, tra)}}
-    # end
-
-    {:noreply, state}
   end
 
   @impl true
@@ -138,12 +133,14 @@ defmodule HiveTorrent.UDPServer do
       recv_action === @error_action ->
         {
           :error,
-          "Received error response for transaction #{format_transaction_id(transaction_id)}, reason #{message_body}."
+          "Received error response for transaction #{Tracker.format_transaction_id(transaction_id)}, reason #{message_body}.",
+          transaction_data
         }
 
       recv_action !== action ->
         {:error,
-         "Requested action #{action} is not matched with received action #{recv_action} for transaction #{format_transaction_id(transaction_id)}."}
+         "Requested action #{action} is not matched with received action #{recv_action} for transaction #{Tracker.format_transaction_id(transaction_id)}.",
+         transaction_data}
 
       action === @connect_action ->
         <<connection_id::64>> = message_body
@@ -151,7 +148,7 @@ defmodule HiveTorrent.UDPServer do
         {:cont, %{transaction_data | action: target_action, connection_id: connection_id}}
 
       action === @announce_action ->
-        {:done, message_body}
+        {:done, message_body, transaction_data}
 
       true ->
         # this shouldn't happen ever
@@ -159,27 +156,34 @@ defmodule HiveTorrent.UDPServer do
     end
   end
 
-  defp handle_next_action({:fatal_error, reason}, state, _transaction_id) do
+  defp handle_next_action({:fatal_error, reason}, state) do
     Logger.critical(reason)
-    # TODO broadcast the error message
     {:stop, {:error, reason}, state}
   end
 
-  defp handle_next_action({:error, reason}, state, transaction_id) do
+  defp handle_next_action({:error, reason, transaction_data}, state) do
     Logger.error(reason)
     # TODO broadcast the error message
-    {:noreply, %{state | requests: Map.delete(state.requests, transaction_id)}}
+    {:noreply, %{state | requests: Map.delete(state.requests, transaction_data.id)}}
   end
 
-  defp handle_next_action({:done, message}, state, transaction_id) do
-    # LOG
-    # TODO broadcast the message
-    {:noreply, %{state | requests: Map.delete(state.requests, transaction_id)}}
+  defp handle_next_action({:done, message, transaction_data}, state) do
+    Logger.debug(
+      "Received message for transaction with id #{Tracker.format_transaction_id(transaction_data.id)}"
+    )
+
+    broadcast_message(transaction_data.action, message, transaction_data.id)
+
+    {:noreply, %{state | requests: Map.delete(state.requests, transaction_data.id)}}
   end
 
-  defp handle_next_action({:cont, transaction_data}, state, transaction_id) do
-    # TODO broadcast the message
-    {:noreply, %{state | requests: Map.delete(state.requests, transaction_id)}}
+  defp handle_next_action({:cont, transaction_data}, state) do
+    Logger.info(
+      "Sending next action #{transaction_data.action} for transaction id #{Tracker.format_transaction_id(transaction_data.id)}."
+    )
+
+    {:noreply,
+     %{state | requests: Map.put(state.requests, transaction_data.id, transaction_data)}}
   end
 
   defp parse_message(
@@ -192,7 +196,7 @@ defmodule HiveTorrent.UDPServer do
 
       :error ->
         {:error,
-         "Transaction data not found for transaction with id #{format_transaction_id(transaction_id)}."}
+         "Transaction data not found for transaction with id #{Tracker.format_transaction_id(transaction_id)}."}
     end
   end
 
@@ -217,31 +221,38 @@ defmodule HiveTorrent.UDPServer do
     {:error, "Unsupported transaction data structure #{inspect(invalid_transaction_data)}."}
   end
 
-  defp map_message_action(action) do
-    case action do
-      @connect_action -> {:ok, "connect"}
-      @announce_action -> {:ok, "announce"}
-      @scrape_action -> {:ok, "scrape"}
-      @error_action -> {:ok, "error"}
-      val -> {:error, "Invalid value for action #{val}"}
-    end
-  end
-
-  defp format_transaction_id(transaction_id) when is_integer(transaction_id),
-    do: Integer.to_string(transaction_id, 16)
-
   defp format_address({a, b, c, d}, port), do: "#{a}.#{b}.#{c}.#{d}:#{port}"
 
-  defp broadcast_recv_message(data, transaction_id) do
-    Logger.info("Broadcasting response with transaction id #{transaction_id} to UPD trackers.")
+  defp broadcast_message(@announce_action, data, transaction_id) do
+    broadcast_message_to_trackers(
+      data,
+      transaction_id,
+      &UDPTracker.broadcast_announce_message/3
+    )
+  end
+
+  defp broadcast_message(@scrape_action, data, transaction_id) do
+    broadcast_message_to_trackers(
+      data,
+      transaction_id,
+      &UDPTracker.broadcast_scrape_message/3
+    )
+  end
+
+  defp broadcast_message_to_trackers(data, transaction_id, broadcast_callback) do
+    formatted_trans_id = Tracker.format_transaction_id(transaction_id)
+
+    Logger.info(
+      "Broadcasting response with transaction id #{formatted_trans_id} to UPD trackers as #{inspect(broadcast_callback)}."
+    )
 
     Registry.dispatch(HiveTorrent.TrackerRegistry, :udp_trackers, fn entries ->
       for {pid, _} <- entries do
         Logger.info(
-          "Broadcasting response to #{inspect(pid)} with transaction id #{transaction_id}."
+          "Broadcasting response to #{inspect(pid)} with transaction id #{formatted_trans_id}."
         )
 
-        UDPTracker.broadcast_recv_message(pid, data)
+        broadcast_callback.(pid, transaction_id, data)
       end
     end)
   end

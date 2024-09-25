@@ -68,6 +68,7 @@ defmodule HiveTorrent.UDPServer do
          {:ok, message} <- create_message(transaction_data),
          :ok <- :gen_udp.send(socket, ip, port, message) do
       Logger.info("Sent UDP connect message to #{format_address(ip, port)}.")
+      {:noreply, state}
     else
       {:error, reason} ->
         Logger.error(
@@ -182,6 +183,8 @@ defmodule HiveTorrent.UDPServer do
       "Sending next action #{transaction_data.action} for transaction id #{Tracker.format_transaction_id(transaction_data.id)}."
     )
 
+    Process.send(self(), {:send_request, transaction_data.id}, [:noconnect])
+
     {:noreply,
      %{state | requests: Map.put(state.requests, transaction_data.id, transaction_data)}}
   end
@@ -204,13 +207,13 @@ defmodule HiveTorrent.UDPServer do
     {:error, "Invalid message format received."}
   end
 
-  defp create_message(%{action: @connect_action, transaction_id: transaction_id}) do
+  defp create_message(%{action: @connect_action, id: transaction_id}) do
     {:ok, <<@udp_protocol_id::64, @connect_action::32, transaction_id::32>>}
   end
 
   defp create_message(%{
          action: @announce_action,
-         transaction_id: transaction_id,
+         id: transaction_id,
          connection_id: connection_id,
          message: message
        }) do

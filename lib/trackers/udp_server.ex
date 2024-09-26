@@ -14,8 +14,8 @@ defmodule HiveTorrent.UDPServer do
 
   # Client API
 
-  def start_link(port) when is_integer(port) do
-    GenServer.start_link(__MODULE__, port, name: __MODULE__)
+  def start_link(opts) do
+    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
 
   def send_announce_message(message, ip, port) do
@@ -25,7 +25,8 @@ defmodule HiveTorrent.UDPServer do
   # Server Callbacks
 
   @impl true
-  def init(port) do
+  def init(opts) do
+    port = Keyword.fetch!(opts, :port)
     {:ok, socket} = :gen_udp.open(port, [:binary, active: true])
     {:ok, %{socket: socket, requests: %{}}}
   end
@@ -152,7 +153,7 @@ defmodule HiveTorrent.UDPServer do
         {:done, message_body, transaction_data}
 
       true ->
-        # this shouldn't happen ever
+        # this shouldn't happen ever, crash in case happens because it is unexpected state
         {:fatal_error, "Process unsupported action #{recv_action}."}
     end
   end

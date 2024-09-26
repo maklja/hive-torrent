@@ -126,6 +126,27 @@ defmodule HiveTorrent.UDPTracker do
     end
   end
 
+  @impl true
+  def terminate(_reason, %{tracker_params: tracker_params, timeout_id: timeout_id} = state) do
+    Logger.info("Terminating tracker #{tracker_params.tracker_url}")
+
+    cancel_scheduled_time(timeout_id)
+
+    case url_to_inet_address(tracker_params.tracker_url) do
+      {:ok, ip, port} ->
+        transaction_id = send_announce_message(ip, port, %{state | event: Tracker.stopped().key})
+
+        Logger.info(
+          "Sent stopped message with transaction id #{Tracker.format_transaction_id(transaction_id)}."
+        )
+
+        :ok
+
+      _ ->
+        :ok
+    end
+  end
+
   defp process_announce_message(
          <<interval::32, leechers::32, seeders::32, address_list::binary>>,
          %{tracker_params: tracker_params} = state
@@ -146,7 +167,7 @@ defmodule HiveTorrent.UDPTracker do
       }
 
     tracker_data =
-      case TrackerStorage.get(tracker_params.info_hash) do
+      case TrackerStorage.get(tracker_params.tracker_url) do
         {:ok, %Tracker{peers: old_peers}} ->
           TrackerStorage.put(%{tracker_data | peers: Map.merge(old_peers, peers)})
 
@@ -176,8 +197,8 @@ defmodule HiveTorrent.UDPTracker do
            key: key
          }
        ) do
-    Logger.info("Sent announce message from tracker #{tracker_params.tracker_url}.")
     %{info_hash: info_hash, tracker_url: tracker_url, num_want: num_want} = tracker_params
+    Logger.info("Sent announce message from tracker #{tracker_url}.")
 
     {:ok, stats} = StatsStorage.get(info_hash)
 

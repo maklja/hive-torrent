@@ -60,6 +60,7 @@ defmodule HiveTorrent.HTTPTracker do
       tracker_params: tracker_params,
       tracker_data: nil,
       error: nil,
+      timeout_id: nil,
       event: Tracker.started().value,
       key: :rand.uniform(0xFFFFFFFF)
     }
@@ -107,14 +108,21 @@ defmodule HiveTorrent.HTTPTracker do
         )
 
         TrackerStorage.put(tracker_data)
-        schedule_fetch(tracker_data)
+        timeout_id = schedule_fetch(tracker_data)
 
-        {:noreply, %{state | tracker_data: tracker_data, error: nil, event: Tracker.none().value}}
+        {:noreply,
+         %{
+           state
+           | tracker_data: tracker_data,
+             error: nil,
+             event: Tracker.none().value,
+             timeout_id: timeout_id
+         }}
 
       {:error, reason} ->
         Logger.error(reason)
-        schedule_fetch(nil)
-        {:noreply, %{state | error: reason}}
+        timeout_id = schedule_fetch(nil)
+        {:noreply, %{state | error: reason, timeout_id: timeout_id}}
     end
   end
 
@@ -124,8 +132,10 @@ defmodule HiveTorrent.HTTPTracker do
   end
 
   @impl true
-  def terminate(_reason, %{tracker_params: tracker_params, key: key}) do
+  def terminate(_reason, %{tracker_params: tracker_params, key: key, timeout_id: timeout_id}) do
     Logger.info("Terminating tracker #{tracker_params.tracker_url}")
+
+    cancel_scheduled_time(timeout_id)
 
     # Let it crash in case stats for the torrent are not found, this is then some fatal error
     {:ok, stats} = StatsStorage.get(tracker_params.info_hash)
@@ -162,6 +172,10 @@ defmodule HiveTorrent.HTTPTracker do
         Map.get(tracker_data, :interval, @default_interval)
 
     Process.send_after(self(), :schedule_announce, interval * 1_000)
+  end
+
+  defp cancel_scheduled_time(timeout_ref) when is_reference(timeout_ref) do
+    Process.cancel_timer(timeout_ref)
   end
 
   @spec fetch_tracker_data(map()) :: {:ok, Tracker.t()} | {:error, String.t()}

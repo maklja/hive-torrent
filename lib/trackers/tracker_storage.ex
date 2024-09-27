@@ -5,7 +5,7 @@ defmodule HiveTorrent.TrackerStorage do
 
   use Agent
 
-  alias HiveTorrent.HTTPTracker
+  alias HiveTorrent.Tracker
 
   @spec start_link(any()) :: {:error, {any(), any()}} | {:ok, pid()}
   def start_link(_opts) do
@@ -21,28 +21,19 @@ defmodule HiveTorrent.TrackerStorage do
       iex> HiveTorrent.TrackerStorage.get("http://example.com:333/announce")
       :error
 
-      iex> HiveTorrent.TrackerStorage.put(%HiveTorrent.HTTPTracker{
-      ...> tracker_url: "https://local-tracker.com:333/announce",
-      ...> complete: 100,
-      ...> incomplete: 3,
-      ...> downloaded: 300,
-      ...> interval: 60_000,
-      ...> min_interval: 30_000,
-      ...> peers: <<1234>>
-      ...> })
-      :ok
       iex> HiveTorrent.TrackerStorage.get("https://local-tracker.com:333/announce")
-      {:ok, %HiveTorrent.HTTPTracker{
+      {:ok, %HiveTorrent.Tracker{
         tracker_url: "https://local-tracker.com:333/announce",
         complete: 100,
         incomplete: 3,
         downloaded: 300,
         interval: 60_000,
         min_interval: 30_000,
-        peers: <<1234>>
+        peers: <<192, 168, 0, 1, 6345>>,
+        updated_at: ~U[2024-09-10 15:20:30Z]
       }}
   """
-  @spec get(String.t()) :: :error | {:ok, HTTPTracker.t()}
+  @spec get(String.t()) :: :error | {:ok, Tracker.t()}
   def get(tracker_url) do
     # TODO this should be pair tracker id + info hash?
     # Because one tracker can be used for multiple torrent files
@@ -51,10 +42,31 @@ defmodule HiveTorrent.TrackerStorage do
   end
 
   @doc """
+  Returns all trackers torrent data.
+
+  ## Examples
+      iex> HiveTorrent.TrackerStorage.get_all()
+      [%HiveTorrent.Tracker{
+        tracker_url: "https://local-tracker.com:333/announce",
+        complete: 100,
+        incomplete: 3,
+        downloaded: 300,
+        interval: 60_000,
+        min_interval: 30_000,
+        peers: <<192, 168, 0, 1, 6345>>,
+        updated_at: ~U[2024-09-10 15:20:30Z]
+      }]
+  """
+  @spec get_all() :: [Tracker.t()]
+  def get_all() do
+    Agent.get(__MODULE__, &Map.values(&1))
+  end
+
+  @doc """
   Add new latest torrent data.
 
   ## Examples
-      iex> HiveTorrent.TrackerStorage.put(%HiveTorrent.HTTPTracker{
+      iex> HiveTorrent.TrackerStorage.put(%HiveTorrent.Tracker{
       ...> tracker_url: "https://local-tracker.com:333/announce",
       ...> complete: 100,
       ...> incomplete: 3,
@@ -63,10 +75,19 @@ defmodule HiveTorrent.TrackerStorage do
       ...> min_interval: 30_000,
       ...> peers: <<1234>>
       ...> })
-      :ok
+      %HiveTorrent.Tracker{
+        tracker_url: "https://local-tracker.com:333/announce",
+        complete: 100,
+        incomplete: 3,
+        downloaded: 300,
+        interval: 60_000,
+        min_interval: 30_000,
+        peers: <<1234>>
+      }
   """
-  @spec put(HTTPTracker.t()) :: :ok
-  def put(%HTTPTracker{tracker_url: tracker_url} = tracker) do
-    Agent.update(__MODULE__, &Map.put(&1, tracker_url, tracker))
+  @spec put(Tracker.t()) :: Tracker.t()
+  def put(%Tracker{tracker_url: tracker_url} = tracker) do
+    :ok = Agent.update(__MODULE__, &Map.put(&1, tracker_url, tracker))
+    tracker
   end
 end

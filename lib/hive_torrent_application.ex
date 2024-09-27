@@ -24,14 +24,13 @@ defmodule HiveTorrent.Application do
       uploaded: 0,
       downloaded: 0,
       left: 0,
-      event: "started"
+      completed: []
     })
 
     Enum.each(torrent.trackers, fn tracker_url ->
       tracker_params = %{
         tracker_url: tracker_url,
-        info_hash: torrent.info_hash,
-        compact: 1
+        info_hash: torrent.info_hash
       }
 
       TrackerSupervisor.start_tracker(tracker_params)

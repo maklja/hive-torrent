@@ -8,14 +8,15 @@ defmodule HiveTorrent.StatsStorage do
   @type t :: %__MODULE__{
           info_hash: binary(),
           peer_id: String.t(),
+          ip: binary() | nil,
           port: pos_integer(),
           uploaded: non_neg_integer(),
           downloaded: non_neg_integer(),
           left: non_neg_integer(),
-          event: String.t()
+          completed: [String.t()]
         }
 
-  defstruct [:info_hash, :peer_id, :port, :uploaded, :downloaded, :left, :event]
+  defstruct [:info_hash, :peer_id, :ip, :port, :uploaded, :downloaded, :left, :completed]
 
   def start_link(stats_list \\ []) do
     stats_map =
@@ -35,30 +36,59 @@ defmodule HiveTorrent.StatsStorage do
       iex> HiveTorrent.StatsStorage.get("info_hash")
       :error
 
-      iex> HiveTorrent.StatsStorage.put(%HiveTorrent.StatsStorage{
-      ...> info_hash: "12345",
-      ...> event: "started",
-      ...> peer_id: "3456",
-      ...> downloaded: 100,
-      ...> left: 8,
-      ...> port: 6889,
-      ...> uploaded: 1000
-      ...> })
-      :ok
-      iex> HiveTorrent.StatsStorage.get("12345")
+      iex> HiveTorrent.StatsStorage.get("56789")
       {:ok, %HiveTorrent.StatsStorage{
-        info_hash: "12345",
-        event: "started",
+        info_hash: "56789",
         peer_id: "3456",
         downloaded: 100,
         left: 8,
+        ip: "192.168.0.23",
         port: 6889,
-        uploaded: 1000
+        uploaded: 1000,
+        completed: ["https://local-tracker.com:333/announce"]
       }}
   """
-  @spec get(String.t()) :: {:ok, t()} | :error
+  @spec get(binary()) :: {:ok, t()} | :error
   def get(info_hash) do
     Agent.get(__MODULE__, &Map.fetch(&1, info_hash))
+  end
+
+  @doc """
+  Mark that event completed has been sent to the tracker.
+
+  ## Examples
+      iex> HiveTorrent.StatsStorage.completed("56789", "https://tracker.com:333/announce")
+      :ok
+  """
+  @spec completed(binary(), String.t()) :: :ok
+  def completed(info_hash, tracker_url) when is_bitstring(tracker_url) do
+    Agent.update(__MODULE__, fn torrent_stats_map ->
+      case Map.fetch(torrent_stats_map, info_hash) do
+        {:ok, torrent_stats} ->
+          updated_stats = %{
+            torrent_stats
+            | completed: Enum.uniq([tracker_url | torrent_stats.completed])
+          }
+
+          Map.put(torrent_stats_map, updated_stats.info_hash, updated_stats)
+
+        _ ->
+          torrent_stats_map
+      end
+    end)
+  end
+
+  @doc """
+  Check if event completed is already sent to the tracker.
+
+  ## Examples
+      iex> {:ok, torrent_stats} = HiveTorrent.StatsStorage.get("56789")
+      iex> HiveTorrent.StatsStorage.has_completed?(torrent_stats, "https://local-tracker.com:333/announce")
+      true
+  """
+  @spec has_completed?(t(), String.t()) :: boolean()
+  def has_completed?(%HiveTorrent.StatsStorage{completed: completed}, tracker_url) do
+    Enum.member?(completed, tracker_url)
   end
 
   @doc """
@@ -67,12 +97,13 @@ defmodule HiveTorrent.StatsStorage do
   ## Examples
       iex> HiveTorrent.StatsStorage.put(%HiveTorrent.StatsStorage{
       ...> info_hash: "12345",
-      ...> event: "started",
       ...> peer_id: "3456",
       ...> downloaded: 100,
       ...> left: 8,
+      ...> ip: "192.168.0.23",
       ...> port: 6889,
-      ...> uploaded: 1000
+      ...> uploaded: 1000,
+      ...> completed: []
       ...> })
       :ok
       iex> HiveTorrent.StatsStorage.uploaded("12345", 99)
@@ -80,15 +111,16 @@ defmodule HiveTorrent.StatsStorage do
       iex> HiveTorrent.StatsStorage.get("12345")
       {:ok, %HiveTorrent.StatsStorage{
         info_hash: "12345",
-        event: "started",
         peer_id: "3456",
         downloaded: 100,
         left: 8,
+        ip: "192.168.0.23",
         port: 6889,
-        uploaded: 1099
+        uploaded: 1099,
+        completed: []
       }}
   """
-  @spec uploaded(String.t(), non_neg_integer()) :: :ok
+  @spec uploaded(binary(), non_neg_integer()) :: :ok
   def uploaded(info_hash, amount_bytes) when is_integer(amount_bytes) and amount_bytes >= 0 do
     Agent.update(__MODULE__, fn torrent_stats_map ->
       case Map.fetch(torrent_stats_map, info_hash) do
@@ -108,12 +140,12 @@ defmodule HiveTorrent.StatsStorage do
   ## Examples
       iex> HiveTorrent.StatsStorage.put(%HiveTorrent.StatsStorage{
       ...> info_hash: "12345",
-      ...> event: "started",
       ...> peer_id: "3456",
       ...> downloaded: 100,
       ...> left: 8,
       ...> port: 6889,
-      ...> uploaded: 1000
+      ...> uploaded: 1000,
+      ...> completed: []
       ...> })
       :ok
   """

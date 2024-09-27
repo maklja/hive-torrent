@@ -17,25 +17,13 @@ defmodule HiveTorrent.HTTPTracker do
 
   require Logger
 
-  alias HiveTorrent.HTTPTracker
+  alias HiveTorrent.Tracker
   alias HiveTorrent.Bencode.Parser
   alias HiveTorrent.StatsStorage
   alias HiveTorrent.TrackerStorage
 
   @default_interval 30 * 60
   @default_error_interval 30
-
-  @type t :: %__MODULE__{
-          tracker_url: String.t(),
-          complete: pos_integer(),
-          downloaded: pos_integer(),
-          incomplete: pos_integer(),
-          interval: pos_integer(),
-          min_interval: pos_integer(),
-          peers: %{String.t() => [pos_integer()]}
-        }
-
-  defstruct [:tracker_url, :complete, :downloaded, :incomplete, :interval, :min_interval, :peers]
 
   @doc """
   Starts the HTTP/HTTPS tracker client.
@@ -63,56 +51,78 @@ defmodule HiveTorrent.HTTPTracker do
   @impl true
   def init(tracker_params) do
     Logger.info("Started tracker #{tracker_params.tracker_url}")
-    tracker_params = Map.put_new(tracker_params, :compact, 1)
 
-    state = %{tracker_params: tracker_params, tracker_data: nil, error: nil}
-    {:ok, state, {:continue, :fetch_tracker_data}}
+    tracker_params = tracker_params |> Map.put_new(:compact, 1) |> Map.put_new(:num_want, nil)
+
+    {:ok, _value} = Registry.register(HiveTorrent.TrackerRegistry, :http_trackers, tracker_params)
+
+    state = %{
+      tracker_params: tracker_params,
+      tracker_data: nil,
+      error: nil,
+      timeout_id: nil,
+      event: Tracker.started().value,
+      key: :rand.uniform(0xFFFFFFFF)
+    }
+
+    {:ok, state, {:continue, :announce}}
   end
 
   @impl true
-  def handle_continue(:fetch_tracker_data, %{tracker_params: tracker_params} = state) do
+  def handle_continue(:announce, %{tracker_params: tracker_params} = state) do
     Logger.info("Init tracker #{tracker_params.tracker_url}")
-    tracker_data_response = fetch_tracker_data(tracker_params)
 
-    case tracker_data_response do
-      {:ok, tracker_data} ->
-        Logger.debug(
-          "Received tracker(#{tracker_params.tracker_url}) data: #{inspect(tracker_data_response)}"
-        )
-
-        TrackerStorage.put(tracker_data)
-        schedule_fetch(tracker_data)
-
-        new_state = state |> Map.put(:tracker_data, tracker_data) |> Map.put(:error, nil)
-        {:noreply, new_state}
-
-      {:error, reason} ->
-        Logger.error(reason)
-        schedule_error_fetch()
-        {:noreply, Map.put(state, :error, reason)}
-    end
+    handle_info(:schedule_announce, state)
   end
 
   @impl true
-  def handle_info(:schedule, %{tracker_params: tracker_params} = state) do
-    tracker_data_response = fetch_tracker_data(tracker_params)
+  def handle_info(
+        :schedule_announce,
+        %{tracker_params: tracker_params, event: current_event, key: key} = state
+      ) do
+    # Let it crash in case stats for the torrent are not found, this is then some fatal error
+    {:ok, stats} = StatsStorage.get(tracker_params.info_hash)
+    has_completed_sent = StatsStorage.has_completed?(stats, tracker_params.tracker_url)
+
+    next_event =
+      cond do
+        current_event === Tracker.started().value -> Tracker.started().value
+        has_completed_sent -> Tracker.none().value
+        stats.left == 0 -> Tracker.completed().value
+        true -> Tracker.none().value
+      end
+
+    fetch_params =
+      stats
+      |> Map.from_struct()
+      |> Map.merge(tracker_params)
+      |> Map.put(:event, next_event)
+      |> Map.put(:key, key)
+
+    tracker_data_response = fetch_tracker_data(fetch_params)
 
     case tracker_data_response do
       {:ok, tracker_data} ->
         Logger.debug(
-          "Received tracker(#{state.tracker_url}) data: #{inspect(tracker_data_response)}"
+          "Received tracker(#{tracker_params.tracker_url}) data: #{inspect(tracker_data)}"
         )
 
         TrackerStorage.put(tracker_data)
-        schedule_fetch(tracker_data)
+        timeout_id = schedule_fetch(tracker_data)
 
-        new_state = state |> Map.put(:tracker_data, tracker_data) |> Map.put(:error, nil)
-        {:noreply, new_state}
+        {:noreply,
+         %{
+           state
+           | tracker_data: tracker_data,
+             error: nil,
+             event: Tracker.none().value,
+             timeout_id: timeout_id
+         }}
 
       {:error, reason} ->
         Logger.error(reason)
-        schedule_error_fetch()
-        {:noreply, Map.put(state, :error, reason)}
+        timeout_id = schedule_fetch(nil)
+        {:noreply, %{state | error: reason, timeout_id: timeout_id}}
     end
   end
 
@@ -121,8 +131,39 @@ defmodule HiveTorrent.HTTPTracker do
     {:reply, state, state}
   end
 
-  defp schedule_error_fetch() do
-    Process.send_after(self(), :schedule, @default_error_interval * 1_000)
+  @impl true
+  def terminate(_reason, %{tracker_params: tracker_params, key: key, timeout_id: timeout_id}) do
+    Logger.info("Terminating tracker #{tracker_params.tracker_url}")
+
+    cancel_scheduled_time(timeout_id)
+
+    # Let it crash in case stats for the torrent are not found, this is then some fatal error
+    {:ok, stats} = StatsStorage.get(tracker_params.info_hash)
+
+    fetch_params =
+      stats
+      |> Map.from_struct()
+      |> Map.merge(tracker_params)
+      |> Map.put(:event, Tracker.stopped().value)
+      |> Map.put(:key, key)
+
+    tracker_data_response = fetch_tracker_data(fetch_params)
+
+    case tracker_data_response do
+      {:ok, tracker_data} ->
+        Logger.debug(
+          "Received tracker(#{tracker_params.tracker_url}) data: #{inspect(tracker_data)}"
+        )
+
+      {:error, reason} ->
+        Logger.error(reason)
+    end
+
+    :ok
+  end
+
+  defp schedule_fetch(nil) do
+    Process.send_after(self(), :schedule_announce, @default_error_interval * 1_000)
   end
 
   defp schedule_fetch(tracker_data) do
@@ -130,50 +171,56 @@ defmodule HiveTorrent.HTTPTracker do
       Map.get(tracker_data, :min_interval) ||
         Map.get(tracker_data, :interval, @default_interval)
 
-    Process.send_after(self(), :schedule, interval * 1_000)
+    Process.send_after(self(), :schedule_announce, interval * 1_000)
   end
 
-  @spec fetch_tracker_data(map()) :: {:ok, HTTPTracker.t()} | {:error, String.t()}
+  defp cancel_scheduled_time(timeout_ref) when is_reference(timeout_ref) do
+    Process.cancel_timer(timeout_ref)
+  end
+
+  @spec fetch_tracker_data(map()) :: {:ok, Tracker.t()} | {:error, String.t()}
   defp fetch_tracker_data(%{
          tracker_url: tracker_url,
          info_hash: info_hash,
-         compact: compact
+         compact: compact,
+         event: event,
+         peer_id: peer_id,
+         ip: ip,
+         key: key,
+         port: port,
+         uploaded: uploaded,
+         downloaded: downloaded,
+         left: left,
+         num_want: num_want
        }) do
-    # TODO handle if the stats are not found in the storage, unknown torrent in this case?
-    {:ok,
-     %StatsStorage{
-       peer_id: peer_id,
-       port: port,
-       uploaded: uploaded,
-       downloaded: downloaded,
-       left: left,
-       event: event
-     }} = StatsStorage.get(info_hash)
-
     Logger.debug("Fetching tracker data #{tracker_url}.")
 
-    query_params =
-      URI.encode_query(%{
-        info_hash: info_hash,
-        peer_id: peer_id,
-        port: port,
-        uploaded: uploaded,
-        downloaded: downloaded,
-        left: left,
-        compact: compact,
-        event: event
-      })
+    query_params = %{
+      info_hash: info_hash,
+      peer_id: peer_id,
+      port: port,
+      uploaded: uploaded,
+      downloaded: downloaded,
+      left: left,
+      compact: compact,
+      event: event,
+      key: key
+    }
 
-    url = "#{tracker_url}?#{query_params}"
+    query_params = if ip, do: Map.put(query_params, :ip, ip), else: query_params
+
+    query_params = if num_want, do: Map.put(query_params, :numwant, num_want), else: query_params
+
+    url = "#{tracker_url}?#{URI.encode_query(query_params)}"
     response = HTTPoison.get(url, [{"Accept", "text/plain"}])
 
-    handle_tracker_response(response, tracker_url)
+    handle_tracker_response(response, tracker_url, info_hash)
   end
 
-  defp handle_tracker_response({:ok, response}, tracker_url) do
+  defp handle_tracker_response({:ok, response}, tracker_url, info_hash) do
     case response do
       %HTTPoison.Response{status_code: 200, body: body} ->
-        process_tracker_response(tracker_url, body)
+        process_tracker_response(tracker_url, info_hash, body)
 
       %HTTPoison.Response{status_code: status_code, body: body} ->
         {:error,
@@ -181,11 +228,12 @@ defmodule HiveTorrent.HTTPTracker do
     end
   end
 
-  defp handle_tracker_response({:error, %HTTPoison.Error{reason: reason}}, tracker_url) do
-    {:error, "Error #{reason} encountered during communication with tracker #{tracker_url}."}
+  defp handle_tracker_response({:error, %HTTPoison.Error{reason: reason}}, tracker_url, info_hash) do
+    {:error,
+     "Error #{reason} encountered during communication with tracker #{tracker_url} with info hash #{inspect(info_hash)}."}
   end
 
-  defp process_tracker_response(tracker_url, response_body) do
+  defp process_tracker_response(tracker_url, info_hash, response_body) do
     with {:ok, tracker_state} <- Parser.parse(response_body),
          {:ok, peers_payload} <- Map.fetch(tracker_state, "peers"),
          {:ok, interval} <- Map.fetch(tracker_state, "interval"),
@@ -194,17 +242,19 @@ defmodule HiveTorrent.HTTPTracker do
          incomplete <- Map.get(tracker_state, "incomplete"),
          min_interval = Map.get(tracker_state, "min interval") do
       # TODO handle not compact
-      peers = parse_peers(peers_payload)
+      peers = Tracker.parse_peers(peers_payload)
 
       {:ok,
-       %__MODULE__{
+       %Tracker{
+         info_hash: info_hash,
          tracker_url: tracker_url,
          complete: complete,
          downloaded: downloaded,
          incomplete: incomplete,
          interval: interval,
          min_interval: min_interval,
-         peers: peers
+         peers: peers,
+         updated_at: DateTime.utc_now()
        }}
     else
       {:error, %HiveTorrent.Bencode.SyntaxError{message: message}} ->
@@ -213,26 +263,5 @@ defmodule HiveTorrent.HTTPTracker do
       _unknown_error ->
         {:error, "Invalid tracker response body"}
     end
-  end
-
-  defp parse_peers(
-         peers_binary_payload,
-         peers \\ []
-       )
-
-  defp parse_peers(
-         <<>>,
-         peers
-       ),
-       do: Enum.group_by(peers, &elem(&1, 0), &elem(&1, 1))
-
-  defp parse_peers(
-         <<ip_bin::binary-size(4), port_bin::binary-size(2), other_peers::binary>>,
-         peers
-       ) do
-    ip = ip_bin |> :binary.bin_to_list() |> Enum.join(".")
-    port = :binary.decode_unsigned(port_bin, :big)
-
-    parse_peers(other_peers, [{ip, port} | peers])
   end
 end

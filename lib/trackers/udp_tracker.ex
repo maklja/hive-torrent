@@ -3,7 +3,6 @@ defmodule HiveTorrent.UDPTracker do
 
   require Logger
 
-  # TODO closed callback
   # TODO scrape
 
   alias HiveTorrent.StatsStorage
@@ -21,6 +20,10 @@ defmodule HiveTorrent.UDPTracker do
   def broadcast_scrape_message(_pid, _transaction_id, _message) do
     # GenServer.cast(pid, {:broadcast_announce, transaction_id, message})
     :ok
+  end
+
+  def broadcast_error_message(pid, transaction_id, error_message) do
+    GenServer.cast(pid, {:broadcast_error, transaction_id, error_message})
   end
 
   def start_link(tracker_params) when is_map(tracker_params) do
@@ -123,6 +126,30 @@ defmodule HiveTorrent.UDPTracker do
       )
 
       {:noreply, process_announce_message(message, state)}
+    end
+  end
+
+  @impl true
+  def handle_cast(
+        {:broadcast_error, msg_transaction_id, error_message},
+        %{
+          tracker_data: tracker_data,
+          transaction_id: transaction_id,
+          timeout_id: timeout_id
+        } = state
+      ) do
+    if transaction_id !== msg_transaction_id do
+      Logger.debug("Transaction ids do not match, skipping error message processing.")
+      {:noreply, state}
+    else
+      Logger.error(
+        "Received error message from transaction #{Tracker.format_transaction_id(msg_transaction_id)}, reason #{error_message}"
+      )
+
+      cancel_scheduled_time(timeout_id)
+      schedule_fetch(tracker_data)
+
+      {:noreply, %{state | error: error_message, timeout_id: nil, transaction_id: nil}}
     end
   end
 
@@ -258,10 +285,10 @@ defmodule HiveTorrent.UDPTracker do
   defp url_to_inet_address(url) when is_binary(url) do
     case URI.parse(url) do
       %URI{host: nil} ->
-        {:fatal_error, "Invalid URL: Host not found with tracker #{url}"}
+        {:fatal_error, "Invalid URL: Host not found with tracker #{url}."}
 
       %URI{port: nil} ->
-        {:fatal_error, "Invalid URL: Port not found with tracker #{url}"}
+        {:fatal_error, "Invalid URL: Port not found with tracker #{url}."}
 
       %URI{host: host, port: port} ->
         host_to_inet_address(host, port)
@@ -285,7 +312,7 @@ defmodule HiveTorrent.UDPTracker do
         {:ok, ip_address, port}
 
       {:error, reason} ->
-        {:error, "Failed to resolve hostname, reason #{reason} with tracker #{hostname}"}
+        {:error, "Failed to resolve hostname, reason #{reason} with tracker #{hostname}."}
     end
   end
 end

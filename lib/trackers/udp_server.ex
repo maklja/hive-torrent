@@ -64,6 +64,8 @@ defmodule HiveTorrent.UDPServer do
         {:send_request, transaction_id},
         %{requests: requests, socket: socket} = state
       ) do
+    formatted_trans_id = Tracker.format_transaction_id(transaction_id)
+
     with {:ok, %{ip: ip, port: port} = transaction_data} <-
            Map.fetch(requests, transaction_id),
          {:ok, message} <- create_message(transaction_data),
@@ -73,10 +75,10 @@ defmodule HiveTorrent.UDPServer do
     else
       {:error, reason} ->
         Logger.error(
-          "Failed to send UDP connect message for transaction #{transaction_id}, reason #{reason}, data #{inspect(Map.get(requests, transaction_id))}."
+          "Failed to send UDP connect message for transaction #{formatted_trans_id}, reason #{reason}, data #{inspect(Map.get(requests, transaction_id))}."
         )
 
-        # TODO broadcast that transaction data is missing in case some tracker is waiting
+        broadcast_message(@error_action, reason, transaction_id)
         {:noreply, %{state | requests: Map.delete(requests, transaction_id)}}
 
       _ ->
@@ -84,7 +86,12 @@ defmodule HiveTorrent.UDPServer do
           "Failed to send UDP connect message for transaction #{transaction_id}, data #{inspect(Map.get(requests, transaction_id))}."
         )
 
-        # TODO broadcast that transaction data is missing in case some tracker is waiting
+        broadcast_message(
+          @error_action,
+          "Unknown error received on transaction #{formatted_trans_id}.",
+          transaction_id
+        )
+
         {:noreply, %{state | requests: Map.delete(requests, transaction_id)}}
     end
   end
@@ -165,7 +172,13 @@ defmodule HiveTorrent.UDPServer do
 
   defp handle_next_action({:error, reason, transaction_data}, state) do
     Logger.error(reason)
-    # TODO broadcast the error message
+
+    broadcast_message(
+      @error_action,
+      reason,
+      transaction_data.id
+    )
+
     {:noreply, %{state | requests: Map.delete(state.requests, transaction_data.id)}}
   end
 
@@ -240,6 +253,14 @@ defmodule HiveTorrent.UDPServer do
       data,
       transaction_id,
       &UDPTracker.broadcast_scrape_message/3
+    )
+  end
+
+  defp broadcast_message(@error_action, error, transaction_id) do
+    broadcast_message_to_trackers(
+      error,
+      transaction_id,
+      &UDPTracker.broadcast_error_message/3
     )
   end
 

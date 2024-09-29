@@ -259,7 +259,7 @@ defmodule HiveTorrent.UDPTracker do
       <<info_hash::binary, peer_id::binary, downloaded::64, left::64, uploaded::64,
         next_event::32, peer_ip::32, key::32, num_want::32, peer_port::16>>
 
-    HiveTorrent.UDPServer.send_announce_message(announce_message, ip, port)
+    HiveTorrent.UDPTrackerSocket.send_announce_message(announce_message, ip, port)
   end
 
   defp schedule_timeout() do

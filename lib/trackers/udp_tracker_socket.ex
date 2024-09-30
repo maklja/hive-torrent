@@ -82,7 +82,7 @@ defmodule HiveTorrent.UDPTrackerSocket do
 
       _ ->
         Logger.error(
-          "Failed to send UDP connect message for transaction #{transaction_id}, data #{inspect(Map.get(requests, transaction_id))}."
+          "Failed to send UDP connect message for transaction #{formatted_trans_id}, data #{inspect(Map.get(requests, transaction_id))}."
         )
 
         broadcast_message(

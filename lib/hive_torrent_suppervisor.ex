@@ -3,6 +3,8 @@ defmodule HiveTorrent.Supervisor do
 
   require Logger
 
+  alias HiveTorrent.UDPTracker
+
   def start_link(init_arg) do
     Supervisor.start_link(__MODULE__, init_arg, name: __MODULE__)
   end
@@ -13,35 +15,34 @@ defmodule HiveTorrent.Supervisor do
       {HiveTorrent.StatsStorage, []},
       {HiveTorrent.TrackerStorage, nil},
       {Registry, keys: :duplicate, name: HiveTorrent.TrackerRegistry},
-      {HiveTorrent.UDPTrackerSocket,
-       port: 6888, message_callback: &broadcast_message_to_trackers/3},
+      {HiveTorrent.UDPTrackerSocket, port: 6888, message_callback: &message_received_callback/3},
       {HiveTorrent.TrackerSupervisor, nil}
     ]
 
     Supervisor.init(children, strategy: :one_for_all)
   end
 
-  defp broadcast_message_to_trackers(:announce, transaction_id, error) do
+  defp message_received_callback(:announce, transaction_id, error) do
     broadcast_message_to_trackers(
       transaction_id,
       error,
-      &HiveTorrent.UDPTracker.broadcast_announce_message/3
+      &UDPTracker.broadcast_announce_message/3
     )
   end
 
-  defp broadcast_message_to_trackers(:scrape, transaction_id, error) do
+  defp message_received_callback(:scrape, transaction_id, error) do
     broadcast_message_to_trackers(
       transaction_id,
       error,
-      &HiveTorrent.UDPTracker.broadcast_scrape_message/3
+      &UDPTracker.broadcast_scrape_message/3
     )
   end
 
-  defp broadcast_message_to_trackers(:error, transaction_id, error) do
+  defp message_received_callback(:error, transaction_id, error) do
     broadcast_message_to_trackers(
       transaction_id,
       error,
-      &HiveTorrent.UDPTracker.broadcast_error_message/3
+      &UDPTracker.broadcast_error_message/3
     )
   end
 

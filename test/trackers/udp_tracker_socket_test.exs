@@ -4,7 +4,7 @@ defmodule HiveTorrent.UDPTrackerSocketTest do
   import Mock
 
   setup_with_mocks([
-    {:gen_udp, [:passthrough],
+    {:gen_udp, [:passthrough, :unstick],
      [
        open: fn _port, _opts -> {:ok, "my_socket"} end
      ]}
@@ -24,12 +24,13 @@ defmodule HiveTorrent.UDPTrackerSocketTest do
   end
 
   test "ensure that announce message is properly send and received by socket" do
-    with_mock :gen_udp,
-      send: fn _socket, _ip, _port, _message ->
-        :ok
-      end do
-      :ok
-      # TODO
-    end
+    IO.puts("done")
+    # with_mock :gen_udp,
+    #   send: fn _socket, _ip, _port, _message ->
+    #     :ok
+    #   end do
+    #   :ok
+    #   # TODO
+    # end
   end
 end

@@ -20,17 +20,18 @@ defmodule HiveTorrent.UDPTrackerSocketTest do
     # start_supervised!({StatsStorage, [@stats]})
 
     # {:ok, tracker_params}
-    {:ok, %{}}
+    :ok
   end
 
   test "ensure that announce message is properly send and received by socket" do
     IO.puts("done")
-    # with_mock :gen_udp,
-    #   send: fn _socket, _ip, _port, _message ->
-    #     :ok
-    #   end do
-    #   :ok
-    #   # TODO
-    # end
+
+    with_mock :gen_udp, [:unstick],
+      send: fn _socket, _ip, _port, _message ->
+        IO.puts("called")
+        :ok
+      end do
+      :gen_udp.send("", "", "", <<>>)
+    end
   end
 end

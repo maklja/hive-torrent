@@ -3,12 +3,9 @@ defmodule HiveTorrent.UDPTrackerSocketTest do
 
   import Mock
 
-  setup_with_mocks([
-    {:gen_udp, [:passthrough, :unstick],
-     [
-       open: fn _port, _opts -> {:ok, "my_socket"} end
-     ]}
-  ]) do
+  alias HiveTorrent.UDPTrackerSocket
+
+  setup do
     # tracker_params = %{
     #   tracker_url: @tracker_url,
     #   info_hash: @info_hash
@@ -24,14 +21,26 @@ defmodule HiveTorrent.UDPTrackerSocketTest do
   end
 
   test "ensure that announce message is properly send and received by socket" do
-    IO.puts("done")
+    port = 6888
+    ip = {127, 0, 0, 1}
+
+    message_callback = fn message_type, transaction_id, data ->
+      IO.inspect(message_type)
+      GenServer.call(self(), {:done})
+    end
 
     with_mock :gen_udp, [:unstick],
+      open: fn _port, _opts -> {:ok, "my_socket"} end,
       send: fn _socket, _ip, _port, _message ->
         IO.puts("called")
         :ok
       end do
-      :gen_udp.send("", "", "", <<>>)
+      pid = start_supervised!({UDPTrackerSocket, port: port, message_callback: message_callback})
+
+      transaction_id = UDPTrackerSocket.send_announce_message(<<>>, ip, port)
+      IO.inspect(transaction_id)
     end
+
+    assert_receive {:done}
   end
 end

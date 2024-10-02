@@ -13,6 +13,16 @@ defmodule HiveTorrent.UDPTrackerSocket do
 
   # Client API
 
+  def protocol_id(), do: @udp_protocol_id
+
+  def connect_action(), do: @connect_action
+
+  def announce_action(), do: @announce_action
+
+  def scrape_action(), do: @scrape_action
+
+  def error_action(), do: @error_action
+
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
@@ -64,6 +74,7 @@ defmodule HiveTorrent.UDPTrackerSocket do
         %{requests: requests, message_callback: message_callback, socket: socket} = state
       ) do
     formatted_trans_id = Tracker.format_transaction_id(transaction_id)
+    Logger.info("Sending UDP message for transaction #{formatted_trans_id}.")
 
     with {:ok, %{ip: ip, port: port} = transaction_data} <-
            Map.fetch(requests, transaction_id),

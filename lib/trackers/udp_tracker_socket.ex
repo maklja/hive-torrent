@@ -24,7 +24,12 @@ defmodule HiveTorrent.UDPTrackerSocket do
   def error_action(), do: @error_action
 
   def start_link(opts) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+    port = Keyword.fetch!(opts, :port)
+    message_callback = Keyword.fetch!(opts, :message_callback)
+
+    GenServer.start_link(__MODULE__, [port: port, message_callback: message_callback],
+      name: __MODULE__
+    )
   end
 
   def send_announce_message(message, ip, port) do
@@ -34,10 +39,7 @@ defmodule HiveTorrent.UDPTrackerSocket do
   # Server Callbacks
 
   @impl true
-  def init(opts) do
-    port = Keyword.fetch!(opts, :port)
-    message_callback = Keyword.fetch!(opts, :message_callback)
-
+  def init(port: port, message_callback: message_callback) do
     {:ok, socket} = :gen_udp.open(port, [:binary, active: true])
     {:ok, %{socket: socket, message_callback: message_callback, requests: %{}}}
   end

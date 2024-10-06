@@ -1,5 +1,5 @@
 defmodule HiveTorrent.HttpTrackerTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   import Mock
 

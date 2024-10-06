@@ -1,12 +1,12 @@
 defmodule HiveTorrent.UDPTrackerSocketTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
+
+  doctest HiveTorrent.UDPTrackerSocket
 
   import Mock
 
   alias HiveTorrent.UDPTrackerSocket
   alias HiveTorrent.Tracker
-
-  doctest HiveTorrent.UDPTrackerSocket
 
   @connection_id :rand.uniform(0xFFFFFFFFFFFFFFFF)
 
@@ -26,11 +26,16 @@ defmodule HiveTorrent.UDPTrackerSocketTest do
 
   @req_body <<:rand.uniform(0xFFFFFFFFFFFFFFFF)::64>>
 
+  setup_with_mocks([
+    {:gen_udp, [:unstick, :passthrough],
+     [open: &open_socket_success/2, close: &close_socket_success/1]}
+  ]) do
+    :ok
+  end
+
   test_with_mock "ensure that error response ia handled correctly",
                  :gen_udp,
                  [:unstick, :passthrough],
-                 open: &open_socket_success/2,
-                 close: &close_socket_success/1,
                  send: &send_error_message/4 do
     test_pid = self()
 
@@ -50,8 +55,6 @@ defmodule HiveTorrent.UDPTrackerSocketTest do
   test_with_mock "ensure that error is returned in case response action mismatch",
                  :gen_udp,
                  [:unstick, :passthrough],
-                 open: &open_socket_success/2,
-                 close: &close_socket_success/1,
                  send: &send_invalid_message/4 do
     test_pid = self()
 
@@ -71,8 +74,6 @@ defmodule HiveTorrent.UDPTrackerSocketTest do
   test_with_mock "ensure that announce message is properly send and response received",
                  :gen_udp,
                  [:unstick, :passthrough],
-                 open: &open_socket_success/2,
-                 close: &close_socket_success/1,
                  send: &send_message/4 do
     test_pid = self()
 
@@ -107,8 +108,6 @@ defmodule HiveTorrent.UDPTrackerSocketTest do
   test_with_mock "ensure that sending announce message the unknown errors are propagated",
                  :gen_udp,
                  [:unstick, :passthrough],
-                 open: &open_socket_success/2,
-                 close: &close_socket_success/1,
                  send: &sending_unknown_error/4 do
     test_pid = self()
 
@@ -128,8 +127,7 @@ defmodule HiveTorrent.UDPTrackerSocketTest do
   test_with_mock "socket should fail if can't be open",
                  :gen_udp,
                  [:unstick, :passthrough],
-                 open: &open_socket_error/2,
-                 close: &close_socket_success/1 do
+                 open: &open_socket_error/2 do
     message_callback = fn _message_type, _transaction_id, _data ->
       :error
     end

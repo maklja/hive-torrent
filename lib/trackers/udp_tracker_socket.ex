@@ -1,4 +1,13 @@
 defmodule HiveTorrent.UDPTrackerSocket do
+  @moduledoc """
+  This module implements a UDP socket for communication with a Torrent tracker.
+  Its purpose is to manage the UDP socket, facilitating the sending and receiving of messages to and from the tracker.
+
+  UDPTrackerSocket is a GenServer responsible for sending announce or scrape messages to the specified IP and port.
+  The socket ensures messages are sent in the correct order, meaning a connect message is always sent before an announce or scrape message.
+  Once a response is received, the socket broadcasts it to the provided callback function.
+  Any errors encountered during message sending or response parsing are also forwarded to the callback.
+  """
   use GenServer
 
   require Logger
@@ -23,6 +32,20 @@ defmodule HiveTorrent.UDPTrackerSocket do
 
   def error_action(), do: @error_action
 
+  @doc """
+  Starts the Torrent tracker client UDP socket.
+
+  ## Parameters
+    Options parameter that is keyword list with values:
+    - `port`: Port no which socket will be opened (integer).
+    - `message_callback`: The callback function which will be called on response received or on error.
+
+  ## Examples
+
+      iex> {:ok, _pid} = HiveTorrent.UDPTrackerSocket.start_link([port: 6889, message_callback: fn message_type, transaction_id, message ->
+      ...> IO.puts("\#{message_type} \#{transaction_id} \#{inspect(message)}")
+      ...> end])
+  """
   def start_link(opts) do
     port = Keyword.fetch!(opts, :port)
     message_callback = Keyword.fetch!(opts, :message_callback)
@@ -32,6 +55,22 @@ defmodule HiveTorrent.UDPTrackerSocket do
     )
   end
 
+  @doc """
+  Send announce message to Torrent tracker on specific ip and port.
+
+  ## Parameters
+
+    - `message`: Part of the message that is sent to a Torrent tracker (binary).
+    - `ip`: IP of the Torrent tracker (tuple).
+    - `port`: Port of the Torrent tracker (integer).
+
+  ## Examples
+
+      iex> {:ok, _pid} = HiveTorrent.UDPTrackerSocket.start_link([port: 6889, message_callback: fn message_type, transaction_id, message ->
+      ...> IO.puts("\#{message_type} \#{transaction_id} \#{inspect(message)}")
+      ...> end])
+      iex> _transaction_id = HiveTorrent.UDPTrackerSocket.send_announce_message(<<"test"::binary>>, {192, 168, 0, 1}, 6888)
+  """
   def send_announce_message(message, ip, port) do
     GenServer.call(__MODULE__, {:send_announce, message, ip, port})
   end
@@ -45,14 +84,14 @@ defmodule HiveTorrent.UDPTrackerSocket do
   end
 
   @impl true
-  def handle_call({:send_announce, message_chunk, ip, port}, _from, state) do
+  def handle_call({:send_announce, message, ip, port}, _from, state) do
     transaction_id = :rand.uniform(0xFFFFFFFF)
 
     transaction_data = %{
       id: transaction_id,
       action: @connect_action,
       target_action: @announce_action,
-      message: message_chunk,
+      message: message,
       ip: ip,
       port: port,
       connection_id: nil

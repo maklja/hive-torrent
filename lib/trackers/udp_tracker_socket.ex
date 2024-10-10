@@ -9,6 +9,7 @@ defmodule HiveTorrent.UDPTrackerSocket do
   Any errors encountered during message sending or response parsing are also forwarded to the callback.
   """
   use GenServer
+  @behaviour Trackers.UdpClient
 
   require Logger
 
@@ -71,6 +72,7 @@ defmodule HiveTorrent.UDPTrackerSocket do
       ...> end])
       iex> _transaction_id = HiveTorrent.UDPTrackerSocket.send_announce_message(<<"test"::binary>>, {192, 168, 0, 1}, 6888)
   """
+  @impl true
   def send_announce_message(message, ip, port) do
     GenServer.call(__MODULE__, {:send_announce, message, ip, port})
   end

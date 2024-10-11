@@ -21,7 +21,7 @@ defmodule HiveTorrent.HttpTrackerTest do
       <<159, 148, 57, 222, 243, 160, 159, 148, 57, 222, 241, 147, 222, 148, 157, 222, 255, 47>>
   }
 
-  @mock_updated_date elem(DateTime.from_iso8601("2024-09-10T15:20:30Z"), 1)
+  @mock_updated_date DateTime.now!("Etc/UTC")
   @tracker_url "https://local-tracker.com:333/announce"
   @info_hash <<20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0>>
   @stats %StatsStorage{

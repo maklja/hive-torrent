@@ -28,12 +28,12 @@ defmodule HiveTorrent.UDPTracker do
 
   def start_link(opts) do
     tracker_params = Keyword.fetch!(opts, :tracker_params)
-    send_message_callback = Keyword.fetch!(opts, :send_message_callback)
+    client = Keyword.fetch!(opts, :client)
     timeout = Keyword.get(opts, :timeout, @default_timeout_interval)
 
     GenServer.start_link(__MODULE__,
       tracker_params: tracker_params,
-      send_message_callback: send_message_callback,
+      client: client,
       timeout: timeout
     )
   end
@@ -43,7 +43,7 @@ defmodule HiveTorrent.UDPTracker do
   @impl true
   def init(
         tracker_params: tracker_params,
-        send_message_callback: send_message_callback,
+        client: client,
         timeout: timeout
       ) do
     Logger.info("Started tracker #{tracker_params.tracker_url}.")
@@ -60,7 +60,8 @@ defmodule HiveTorrent.UDPTracker do
       timeout_id: nil,
       timeout: timeout * 1_000,
       event: Tracker.started().key,
-      key: :rand.uniform(0xFFFFFFFF)
+      key: :rand.uniform(0xFFFFFFFF),
+      client: client
     }
 
     {:ok, state, {:continue, :announce}}
@@ -234,7 +235,8 @@ defmodule HiveTorrent.UDPTracker do
          %{
            tracker_params: tracker_params,
            event: event,
-           key: key
+           key: key,
+           client: client
          }
        ) do
     %{info_hash: info_hash, tracker_url: tracker_url, num_want: num_want} = tracker_params
@@ -272,14 +274,14 @@ defmodule HiveTorrent.UDPTracker do
       <<info_hash::binary, peer_id::binary, downloaded::64, left::64, uploaded::64,
         next_event::32, peer_ip::32, key::32, num_want::32, peer_port::16>>
 
-    HiveTorrent.UDPTrackerSocket.send_announce_message(announce_message, ip, port)
+    client.send_announce_message(announce_message, ip, port)
   end
 
   defp schedule_timeout(timeout) do
     Process.send_after(self(), :timeout, timeout)
   end
 
-  defp cancel_schedule_timeout(timeout_ref) when is_reference(timeout_ref) do
+  defp cancel_schedule_timeout(timeout_ref) do
     Process.cancel_timer(timeout_ref)
   end
 

@@ -8,24 +8,16 @@ defmodule HiveTorrent.HttpTrackerTest do
   alias HiveTorrent.HTTPTracker
   alias HiveTorrent.Tracker
   alias HiveTorrent.Bencode.Serializer
+  alias HiveTorrent.TrackerMocks
 
   doctest HiveTorrent.HTTPTracker
 
-  @mock %{
-    "complete" => 10,
-    "downloaded" => 1496,
-    "incomplete" => 0,
-    "interval" => 1831,
-    "min interval" => 915,
-    "peers" =>
-      <<159, 148, 57, 222, 243, 160, 159, 148, 57, 222, 241, 147, 222, 148, 157, 222, 255, 47>>
-  }
-
   @mock_updated_date DateTime.now!("Etc/UTC")
   @tracker_url "https://local-tracker.com:333/announce"
-  @info_hash <<20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0>>
+  @info_hash TrackerMocks.create_info_hash()
   @stats %StatsStorage{
     info_hash: @info_hash,
+    # TODO later with random func that will be used in app
     peer_id: "12345678901234567890",
     port: 6881,
     uploaded: 0,
@@ -58,21 +50,23 @@ defmodule HiveTorrent.HttpTrackerTest do
     tracker_url: tracker_url,
     info_hash: info_hash
   } do
+    tracker_resp = TrackerMocks.http_tracker_response()
+
     expected_tracker_data = %Tracker{
       info_hash: @info_hash,
       tracker_url: tracker_url,
-      complete: 10,
-      downloaded: 1496,
-      incomplete: 0,
-      interval: 1831,
-      min_interval: 915,
+      complete: Map.fetch!(tracker_resp, "complete"),
+      downloaded: Map.fetch!(tracker_resp, "downloaded"),
+      incomplete: Map.fetch!(tracker_resp, "incomplete"),
+      interval: Map.fetch!(tracker_resp, "interval"),
+      min_interval: Map.fetch!(tracker_resp, "min interval"),
       peers: %{"159.148.57.222" => [61843, 62368], "222.148.157.222" => [65327]},
       updated_at: @mock_updated_date
     }
 
     with_mock HTTPoison,
       get: fn _tracker_url, _headers ->
-        {:ok, mock_response} = Serializer.encode(@mock)
+        {:ok, mock_response} = Serializer.encode(tracker_resp)
         {:ok, %HTTPoison.Response{status_code: 200, body: mock_response}}
       end do
       tracker_params = %{
@@ -191,7 +185,9 @@ defmodule HiveTorrent.HttpTrackerTest do
   } do
     with_mock HTTPoison,
       get: fn _tracker_url, _headers ->
-        {:ok, mock_response} = Serializer.encode(Map.delete(@mock, "peers"))
+        {:ok, mock_response} =
+          TrackerMocks.http_tracker_response() |> Map.delete("peers") |> Serializer.encode()
+
         {:ok, %HTTPoison.Response{status_code: 200, body: mock_response}}
       end do
       tracker_params = %{
@@ -218,7 +214,9 @@ defmodule HiveTorrent.HttpTrackerTest do
   } do
     with_mock HTTPoison,
       get: fn _tracker_url, _headers ->
-        {:ok, mock_response} = Serializer.encode(Map.delete(@mock, "interval"))
+        {:ok, mock_response} =
+          TrackerMocks.http_tracker_response() |> Map.delete("interval") |> Serializer.encode()
+
         {:ok, %HTTPoison.Response{status_code: 200, body: mock_response}}
       end do
       tracker_params = %{

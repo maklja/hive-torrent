@@ -7,25 +7,25 @@ defmodule HiveTorrent.UDPTrackerTest do
 
   @mock_updated_date DateTime.now!("Etc/UTC")
 
-  setup_with_mocks([
-    {DateTime, [:passthrough],
-     [
-       utc_now: fn -> @mock_updated_date end,
-       utc_now: fn _ -> @mock_updated_date end
-     ]}
-  ]) do
-    tracker_params = %{
-      tracker_url: @tracker_url,
-      info_hash: @info_hash
-    }
+  # setup_with_mocks([
+  #   {DateTime, [:passthrough],
+  #    [
+  #      utc_now: fn -> @mock_updated_date end,
+  #      utc_now: fn _ -> @mock_updated_date end
+  #    ]}
+  # ]) do
+  #   tracker_params = %{
+  #     tracker_url: @tracker_url,
+  #     info_hash: @info_hash
+  #   }
 
-    start_supervised!({TrackerStorage, nil})
-    start_supervised!({Registry, keys: :duplicate, name: HiveTorrent.TrackerRegistry})
+  #   start_supervised!({TrackerStorage, nil})
+  #   start_supervised!({Registry, keys: :duplicate, name: HiveTorrent.TrackerRegistry})
 
-    start_supervised!({StatsStorage, [@stats]})
+  #   start_supervised!({StatsStorage, [@stats]})
 
-    {:ok, tracker_params}
-  end
+  #   {:ok, tracker_params}
+  # end
 
   # test "ensure that udp tracker fetch the tracker data and store it in TrackerStorage", %{
   #   tracker_url: tracker_url,

@@ -24,16 +24,20 @@ defmodule HiveTorrent.HTTPTracker do
 
   @default_interval 30 * 60
   @default_error_interval 30
+  @default_timeout_interval 5 * 1_000
 
   @doc """
   Starts the HTTP/HTTPS tracker client.
 
   ## Examples
-      iex>{:ok, _pid} = HiveTorrent.HTTPTracker.start_link(%{tracker_url: "http://example/announce", info_hash: <<20, 20>>})
+      iex>{:ok, _pid} = HiveTorrent.HTTPTracker.start_link(tracker_params: %{tracker_url: "http://example/announce", info_hash: <<20, 20>>})
 
   """
-  def start_link(tracker_params) when is_map(tracker_params) do
-    GenServer.start_link(__MODULE__, tracker_params)
+  def start_link(opts) do
+    tracker_params = Keyword.fetch!(opts, :tracker_params)
+    timeout = Keyword.get(opts, :timeout, @default_timeout_interval)
+
+    GenServer.start_link(__MODULE__, tracker_params: tracker_params, timeout: timeout)
   end
 
   @doc """
@@ -49,7 +53,7 @@ defmodule HiveTorrent.HTTPTracker do
   # Callbacks
 
   @impl true
-  def init(tracker_params) do
+  def init(tracker_params: tracker_params, timeout: timeout) do
     Logger.info("Started tracker #{tracker_params.tracker_url}")
 
     tracker_params = tracker_params |> Map.put_new(:compact, 1) |> Map.put_new(:num_want, nil)
@@ -62,7 +66,8 @@ defmodule HiveTorrent.HTTPTracker do
       error: nil,
       timeout_id: nil,
       event: Tracker.started().value,
-      key: :rand.uniform(0xFFFFFFFF)
+      key: :rand.uniform(0xFFFFFFFF),
+      timeout: timeout
     }
 
     {:ok, state, {:continue, :announce}}
@@ -78,7 +83,8 @@ defmodule HiveTorrent.HTTPTracker do
   @impl true
   def handle_info(
         :schedule_announce,
-        %{tracker_params: tracker_params, event: current_event, key: key} = state
+        %{tracker_params: tracker_params, event: current_event, key: key, timeout: timeout} =
+          state
       ) do
     # Let it crash in case stats for the torrent are not found, this is then some fatal error
     {:ok, stats} = StatsStorage.get(tracker_params.info_hash)
@@ -98,6 +104,7 @@ defmodule HiveTorrent.HTTPTracker do
       |> Map.merge(tracker_params)
       |> Map.put(:event, next_event)
       |> Map.put(:key, key)
+      |> Map.put(:timeout, timeout)
 
     tracker_data_response = fetch_tracker_data(fetch_params)
 
@@ -132,7 +139,12 @@ defmodule HiveTorrent.HTTPTracker do
   end
 
   @impl true
-  def terminate(_reason, %{tracker_params: tracker_params, key: key, timeout_id: timeout_id}) do
+  def terminate(_reason, %{
+        tracker_params: tracker_params,
+        key: key,
+        timeout_id: timeout_id,
+        timeout: timeout
+      }) do
     Logger.info("Terminating tracker #{tracker_params.tracker_url}")
 
     cancel_scheduled_time(timeout_id)
@@ -146,6 +158,7 @@ defmodule HiveTorrent.HTTPTracker do
       |> Map.merge(tracker_params)
       |> Map.put(:event, Tracker.stopped().value)
       |> Map.put(:key, key)
+      |> Map.put(:timeout, timeout)
 
     tracker_data_response = fetch_tracker_data(fetch_params)
 
@@ -191,7 +204,8 @@ defmodule HiveTorrent.HTTPTracker do
          uploaded: uploaded,
          downloaded: downloaded,
          left: left,
-         num_want: num_want
+         num_want: num_want,
+         timeout: timeout
        }) do
     Logger.debug("Fetching tracker data #{tracker_url}.")
 
@@ -212,7 +226,7 @@ defmodule HiveTorrent.HTTPTracker do
     query_params = if num_want, do: Map.put(query_params, :numwant, num_want), else: query_params
 
     url = "#{tracker_url}?#{URI.encode_query(query_params)}"
-    response = HTTPoison.get(url, [{"Accept", "text/plain"}])
+    response = HTTPoison.get(url, [{"Accept", "text/plain"}], timeout: timeout)
 
     handle_tracker_response(response, tracker_url, info_hash)
   end
@@ -258,10 +272,10 @@ defmodule HiveTorrent.HTTPTracker do
        }}
     else
       {:error, %HiveTorrent.Bencode.SyntaxError{message: message}} ->
-        {:error, "Failed to parse tracker response: #{message}"}
+        {:error, "Failed to parse tracker response: #{message}."}
 
       _unknown_error ->
-        {:error, "Invalid tracker response body"}
+        {:error, "Invalid tracker response body."}
     end
   end
 end

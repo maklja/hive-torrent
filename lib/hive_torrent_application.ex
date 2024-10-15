@@ -24,7 +24,9 @@ defmodule HiveTorrent.Application do
       uploaded: 0,
       downloaded: 0,
       left: 0,
-      completed: []
+      completed: [],
+      pieces:
+        torrent.pieces |> Enum.map(fn {key, piece} -> {key, elem(piece, 2)} end) |> Map.new()
     })
 
     Enum.each(torrent.trackers, fn tracker_url ->

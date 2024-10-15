@@ -13,10 +13,11 @@ defmodule HiveTorrent.StatsStorage do
           uploaded: non_neg_integer(),
           downloaded: non_neg_integer(),
           left: non_neg_integer(),
-          completed: [String.t()]
+          completed: [String.t()],
+          pieces: %{pos_integer() => pos_integer()}
         }
 
-  defstruct [:info_hash, :peer_id, :ip, :port, :uploaded, :downloaded, :left, :completed]
+  defstruct [:info_hash, :peer_id, :ip, :port, :uploaded, :downloaded, :left, :completed, :pieces]
 
   def start_link(stats_list \\ []) do
     stats_map =
@@ -49,8 +50,13 @@ defmodule HiveTorrent.StatsStorage do
       }}
   """
   @spec get(binary()) :: {:ok, t()} | :error
-  def get(info_hash) do
+  def get(info_hash) when is_binary(info_hash) do
     Agent.get(__MODULE__, &Map.fetch(&1, info_hash))
+  end
+
+  @spec get_all() :: [t()]
+  def get_all() do
+    Agent.get(__MODULE__, &Map.values(&1))
   end
 
   @doc """

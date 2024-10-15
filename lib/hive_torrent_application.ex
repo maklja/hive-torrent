@@ -17,6 +17,15 @@ defmodule HiveTorrent.Application do
 
     peer_id = "12345678901234567890"
 
+    # TODO validate which pieces are already downloaded later
+    remaining_pieces =
+      torrent.pieces
+      |> Enum.map(fn {key, pieces} ->
+        pieces_size = pieces |> Enum.map(&elem(&1, 2)) |> Enum.sum()
+        {key, pieces_size}
+      end)
+      |> Map.new()
+
     StatsStorage.put(%StatsStorage{
       info_hash: torrent.info_hash,
       peer_id: peer_id,
@@ -25,8 +34,7 @@ defmodule HiveTorrent.Application do
       downloaded: 0,
       left: 0,
       completed: [],
-      pieces:
-        torrent.pieces |> Enum.map(fn {key, piece} -> {key, elem(piece, 2)} end) |> Map.new()
+      pieces: remaining_pieces
     })
 
     Enum.each(torrent.trackers, fn tracker_url ->

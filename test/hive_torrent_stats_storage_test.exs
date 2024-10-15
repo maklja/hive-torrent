@@ -21,7 +21,7 @@ defmodule HiveTorrent.StatsStorageTest do
   setup do
     stats = create_stats()
 
-    start_supervised!({StatsStorage, [stats, @mock_doc_tests]})
+    start_supervised!({StatsStorage, [@mock_doc_tests]})
 
     {:ok, %{stats: stats}}
   end
@@ -31,6 +31,7 @@ defmodule HiveTorrent.StatsStorageTest do
   end
 
   test "retrieve existing stats data", %{stats: stats} do
+    assert StatsStorage.put(stats) === :ok
     assert StatsStorage.get(stats.info_hash) === {:ok, stats}
   end
 
@@ -44,6 +45,7 @@ defmodule HiveTorrent.StatsStorageTest do
   test "update upload amount stat", %{stats: stats} do
     expected_stats = %{stats | uploaded: stats.uploaded + 99}
 
+    assert StatsStorage.put(stats) === :ok
     assert StatsStorage.uploaded(stats.info_hash, 99) == :ok
     assert StatsStorage.get(stats.info_hash) == {:ok, expected_stats}
   end
@@ -51,6 +53,7 @@ defmodule HiveTorrent.StatsStorageTest do
   test "mark tracker as notified with completed event", %{stats: stats} do
     completed_url = create_http_tracker_announce_url()
 
+    assert StatsStorage.put(stats) === :ok
     assert StatsStorage.completed(stats.info_hash, completed_url) == :ok
     {:ok, torrent_stats} = StatsStorage.get(stats.info_hash)
     assert StatsStorage.has_completed?(torrent_stats, completed_url)

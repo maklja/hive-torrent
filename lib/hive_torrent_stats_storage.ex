@@ -54,6 +54,24 @@ defmodule HiveTorrent.StatsStorage do
     Agent.get(__MODULE__, &Map.fetch(&1, info_hash))
   end
 
+  @doc """
+  Retrieve latest stats data for all torrents.
+
+  Returns array of the torrent stats.
+
+  ## Examples
+      iex> HiveTorrent.StatsStorage.get_all()
+      [%HiveTorrent.StatsStorage{
+        info_hash: "56789",
+        peer_id: "3456",
+        downloaded: 100,
+        left: 8,
+        ip: "192.168.0.23",
+        port: 6889,
+        uploaded: 1000,
+        completed: ["https://local-tracker.com:333/announce"]
+      }]
+  """
   @spec get_all() :: [t()]
   def get_all() do
     Agent.get(__MODULE__, &Map.values(&1))
@@ -68,19 +86,11 @@ defmodule HiveTorrent.StatsStorage do
   """
   @spec completed(binary(), String.t()) :: :ok
   def completed(info_hash, tracker_url) when is_bitstring(tracker_url) do
-    Agent.update(__MODULE__, fn torrent_stats_map ->
-      case Map.fetch(torrent_stats_map, info_hash) do
-        {:ok, torrent_stats} ->
-          updated_stats = %{
-            torrent_stats
-            | completed: Enum.uniq([tracker_url | torrent_stats.completed])
-          }
-
-          Map.put(torrent_stats_map, updated_stats.info_hash, updated_stats)
-
-        _ ->
-          torrent_stats_map
-      end
+    update_stats(info_hash, fn torrent_stats ->
+      %{
+        torrent_stats
+        | completed: Enum.uniq([tracker_url | torrent_stats.completed])
+      }
     end)
   end
 
@@ -127,16 +137,18 @@ defmodule HiveTorrent.StatsStorage do
       }}
   """
   @spec uploaded(binary(), non_neg_integer()) :: :ok
-  def uploaded(info_hash, amount_bytes) when is_integer(amount_bytes) and amount_bytes >= 0 do
-    Agent.update(__MODULE__, fn torrent_stats_map ->
-      case Map.fetch(torrent_stats_map, info_hash) do
-        {:ok, torrent_stats} ->
-          updated_stats = %{torrent_stats | uploaded: torrent_stats.uploaded + amount_bytes}
-          Map.put(torrent_stats_map, updated_stats.info_hash, updated_stats)
+  def uploaded(info_hash, amount_bytes)
+      when is_binary(info_hash) and is_integer(amount_bytes) and amount_bytes >= 0 do
+    update_stats(info_hash, fn torrent_stats ->
+      %{torrent_stats | uploaded: torrent_stats.uploaded + amount_bytes}
+    end)
+  end
 
-        _ ->
-          torrent_stats_map
-      end
+  def downloaded(info_hash, piece_idx)
+      when is_binary(info_hash) and is_integer(piece_idx) and piece_idx >= 0 do
+    update_stats(info_hash, fn torrent_stats ->
+      nil
+      # TODO
     end)
   end
 
@@ -158,5 +170,18 @@ defmodule HiveTorrent.StatsStorage do
   @spec put(t()) :: :ok
   def put(%HiveTorrent.StatsStorage{info_hash: info_hash} = torrent_stats) do
     Agent.update(__MODULE__, &Map.put_new(&1, info_hash, torrent_stats))
+  end
+
+  defp update_stats(info_hash, callback) do
+    Agent.update(__MODULE__, fn torrent_stats_map ->
+      case Map.fetch(torrent_stats_map, info_hash) do
+        {:ok, torrent_stats} ->
+          updated_stats = callback.(torrent_stats)
+          Map.put(torrent_stats_map, updated_stats.info_hash, updated_stats)
+
+        _ ->
+          torrent_stats_map
+      end
+    end)
   end
 end

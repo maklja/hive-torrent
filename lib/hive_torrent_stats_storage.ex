@@ -14,7 +14,7 @@ defmodule HiveTorrent.StatsStorage do
           downloaded: non_neg_integer(),
           left: non_neg_integer(),
           completed: [String.t()],
-          pieces: %{pos_integer() => pos_integer()}
+          pieces: %{pos_integer() => {pos_integer(), boolean()}}
         }
 
   defstruct [:info_hash, :peer_id, :ip, :port, :uploaded, :downloaded, :left, :completed, :pieces]
@@ -147,8 +147,26 @@ defmodule HiveTorrent.StatsStorage do
   def downloaded(info_hash, piece_idx)
       when is_binary(info_hash) and is_integer(piece_idx) and piece_idx >= 0 do
     update_stats(info_hash, fn torrent_stats ->
-      nil
-      # TODO
+      case Map.fetch(torrent_stats.pieces, piece_idx) do
+        {:ok, {piece_size, false}} ->
+          rem_pieces = Map.put(torrent_stats, piece_idx, {piece_size, true})
+
+          %{
+            torrent_stats
+            | downloaded: torrent_stats.downloaded + piece_size,
+              left: torrent_stats.left - piece_size,
+              pieces: rem_pieces
+          }
+
+        {:ok, {piece_size, true}} ->
+          %{
+            torrent_stats
+            | downloaded: torrent_stats.downloaded + piece_size
+          }
+
+        _ ->
+          torrent_stats
+      end
     end)
   end
 

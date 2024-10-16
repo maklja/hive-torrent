@@ -22,7 +22,7 @@ defmodule HiveTorrent.Application do
       torrent.pieces
       |> Enum.map(fn {key, pieces} ->
         pieces_size = pieces |> Enum.map(&elem(&1, 2)) |> Enum.sum()
-        {key, pieces_size}
+        {key, {pieces_size, false}}
       end)
       |> Map.new()
 

@@ -4,6 +4,8 @@ defmodule HiveTorrent.TorrentTest do
   alias HiveTorrent.Bencode.SyntaxError
   alias HiveTorrent.TorrentError
 
+  import HiveTorrent.TrackerMocks
+
   use ExUnit.Case
 
   doctest HiveTorrent.Torrent
@@ -11,7 +13,7 @@ defmodule HiveTorrent.TorrentTest do
   import Map, only: [fetch!: 2]
 
   test "parse valid torrent with length" do
-    announce = "http://tracker.example.com:8080/announce"
+    announce = create_http_tracker_announce_url()
     created_by = "Hive torrent"
     comment = "Hive comment"
     creation_date = 1_722_686_833
@@ -60,8 +62,8 @@ defmodule HiveTorrent.TorrentTest do
 
   test "parse valid torrent with files" do
     announce_list = [
-      "http://tracker.example.com:8080/announce",
-      "https://tracker.example.com:8080/announce"
+      create_http_tracker_announce_url(),
+      create_http_tracker_announce_url()
     ]
 
     created_by = "Hive torrent"
@@ -160,7 +162,7 @@ defmodule HiveTorrent.TorrentTest do
   end
 
   test "parse torrent without info" do
-    announce = "http://tracker.example.com:8080/announce"
+    announce = create_http_tracker_announce_url()
     created_by = "Hive torrent"
     comment = "Hive comment"
     creation_date = 1_722_686_833
@@ -181,7 +183,7 @@ defmodule HiveTorrent.TorrentTest do
   end
 
   test "parse torrent without piece length" do
-    announce = "http://tracker.example.com:8080/announce"
+    announce = create_http_tracker_announce_url()
     created_by = "Hive torrent"
     comment = "Hive comment"
     creation_date = 1_722_686_833
@@ -211,7 +213,7 @@ defmodule HiveTorrent.TorrentTest do
   end
 
   test "parse torrent without files" do
-    announce = "http://tracker.example.com:8080/announce"
+    announce = create_http_tracker_announce_url()
     created_by = "Hive torrent"
     comment = "Hive comment"
     creation_date = 1_722_686_833
@@ -241,7 +243,7 @@ defmodule HiveTorrent.TorrentTest do
   end
 
   test "parse torrent with corrupted pieces" do
-    announce = "http://tracker.example.com:8080/announce"
+    announce = create_http_tracker_announce_url()
     created_by = "Hive torrent"
     comment = "Hive comment"
     creation_date = 1_722_686_833
@@ -275,7 +277,7 @@ defmodule HiveTorrent.TorrentTest do
   end
 
   test "parse torrent with missing pieces" do
-    announce = "http://tracker.example.com:8080/announce"
+    announce = create_http_tracker_announce_url()
     created_by = "Hive torrent"
     comment = "Hive comment"
     creation_date = 1_722_686_833

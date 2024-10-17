@@ -52,17 +52,40 @@ defmodule HiveTorrent.TrackerMocks do
   def create_info_hash(),
     do: :crypto.strong_rand_bytes(20)
 
-  def create_stats(info_hash \\ create_info_hash()) when is_binary(info_hash),
-    do: %StatsStorage{
+  def create_stats(info_hash \\ create_info_hash()) when is_binary(info_hash) do
+    piece_size = Enum.shuffle([256, 512, 1024, 2048]) |> List.first()
+    pieces_idx = 0..(:rand.uniform(9) + 2) |> Range.to_list()
+
+    pieces =
+      pieces_idx
+      |> Enum.map(fn piece_idx -> {piece_idx, {piece_size, false}} end)
+      |> Map.new()
+
+    pieces =
+      Enum.shuffle(pieces_idx)
+      |> Enum.take(round(length(pieces_idx) / 2))
+      |> Enum.reduce(
+        pieces,
+        &Map.update!(&2, &1, fn {piece_size, _} -> {piece_size, true} end)
+      )
+
+    left =
+      pieces
+      |> Enum.filter(fn {_piece_idx, piece_stats} -> !elem(piece_stats, 1) end)
+      |> Enum.reduce(0, fn {_, {piece_size, _}}, acc -> acc + piece_size end)
+
+    %StatsStorage{
       info_hash: info_hash,
       # TODO later with random func that will be used in app
       peer_id: "12345678901234567890",
       port: :rand.uniform(65_536),
       uploaded: :rand.uniform(1_000_000),
-      downloaded: :rand.uniform(1_000_000),
-      left: :rand.uniform(1_000_000),
-      completed: []
+      downloaded: piece_size * :rand.uniform(100),
+      left: left,
+      completed: [],
+      pieces: pieces
     }
+  end
 
   defp create_ip() do
     {:rand.uniform(255), :rand.uniform(255), :rand.uniform(255), :rand.uniform(255)}

@@ -7,21 +7,26 @@ defmodule HiveTorrent.StatsStorageTest do
 
   import HiveTorrent.TrackerMocks
 
-  @mock_doc_tests %StatsStorage{
-    info_hash: "56789",
-    peer_id: "3456",
-    downloaded: 100,
-    left: 8,
-    ip: "192.168.0.23",
-    port: 6889,
-    uploaded: 1000,
-    completed: ["https://local-tracker.com:333/announce"]
-  }
-
   setup do
+    mock_doc_tests = %StatsStorage{
+      info_hash: "56789",
+      peer_id: "3456",
+      downloaded: 256,
+      left: 512,
+      ip: "192.168.0.23",
+      port: 6889,
+      uploaded: 1000,
+      completed: ["https://local-tracker.com:333/announce"],
+      pieces: %{
+        0 => {256, false},
+        1 => {256, true},
+        2 => {256, false}
+      }
+    }
+
     stats = create_stats()
 
-    start_supervised!({StatsStorage, [@mock_doc_tests]})
+    start_supervised!({StatsStorage, [mock_doc_tests]})
 
     {:ok, %{stats: stats}}
   end
@@ -48,6 +53,48 @@ defmodule HiveTorrent.StatsStorageTest do
     assert StatsStorage.put(stats) === :ok
     assert StatsStorage.uploaded(stats.info_hash, 99) == :ok
     assert StatsStorage.get(stats.info_hash) == {:ok, expected_stats}
+  end
+
+  test "mark piece that is not downloaded as downloaded", %{stats: stats} do
+    {piece_idx_to_mark, {piece_size, _}} =
+      stats.pieces
+      |> Enum.filter(fn {_piece_idx, {_pieces_size, is_downloaded}} -> !is_downloaded end)
+      |> List.first()
+
+    expected_stats = %{
+      stats
+      | downloaded: stats.downloaded + piece_size,
+        left: stats.left - piece_size,
+        pieces: Map.put(stats.pieces, piece_idx_to_mark, {piece_size, true})
+    }
+
+    assert StatsStorage.put(stats) === :ok
+    assert StatsStorage.downloaded(stats.info_hash, piece_idx_to_mark) == :ok
+    assert StatsStorage.get(stats.info_hash) == {:ok, expected_stats}
+  end
+
+  test "mark piece that is downloaded as downloaded", %{stats: stats} do
+    {piece_idx_to_mark, {piece_size, _}} =
+      stats.pieces
+      |> Enum.filter(fn {_piece_idx, {_pieces_size, is_downloaded}} -> is_downloaded end)
+      |> List.first()
+
+    expected_stats = %{
+      stats
+      | downloaded: stats.downloaded + piece_size
+    }
+
+    assert StatsStorage.put(stats) === :ok
+    assert StatsStorage.downloaded(stats.info_hash, piece_idx_to_mark) == :ok
+    assert StatsStorage.get(stats.info_hash) == {:ok, expected_stats}
+  end
+
+  test "mark piece doesn't exists", %{stats: stats} do
+    piece_idx_to_mark = 1_000
+
+    assert StatsStorage.put(stats) === :ok
+    assert StatsStorage.downloaded(stats.info_hash, piece_idx_to_mark) == :ok
+    assert StatsStorage.get(stats.info_hash) == {:ok, stats}
   end
 
   test "mark tracker as notified with completed event", %{stats: stats} do

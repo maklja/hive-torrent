@@ -108,70 +108,74 @@ defmodule HiveTorrent.HttpTrackerTest do
     end
   end
 
-  # test "ensure HTTPTracker sends complete event on download completed", %{
-  #   tracker_url: tracker_url,
-  #   info_hash: info_hash,
-  #   stats: stats
-  # } do
-  #   {tracker_resp, expected_peers} = http_tracker_response()
+  test "ensure HTTPTracker sends complete event on download completed", %{
+    tracker_url: tracker_url,
+    info_hash: info_hash,
+    stats: stats
+  } do
+    {tracker_resp, expected_peers} = http_tracker_response()
 
-  #   expected_tracker_data = %Tracker{
-  #     info_hash: info_hash,
-  #     tracker_url: tracker_url,
-  #     complete: Map.fetch!(tracker_resp, "complete"),
-  #     downloaded: Map.fetch!(tracker_resp, "downloaded"),
-  #     incomplete: Map.fetch!(tracker_resp, "incomplete"),
-  #     interval: 1,
-  #     min_interval: 1,
-  #     peers: expected_peers,
-  #     updated_at: @mock_updated_date
-  #   }
+    # fully completed the download of the file pieces
+    Enum.each(stats.pieces, fn {piece_idx, _} ->
+      StatsStorage.downloaded(info_hash, piece_idx)
+    end)
 
-  #   with_mock HTTPoison,
-  #     get: fn _tracker_url, _headers, _opts ->
-  #       {:ok, mock_response} = Serializer.encode(tracker_resp)
-  #       {:ok, %HTTPoison.Response{status_code: 200, body: mock_response}}
-  #     end do
-  #     tracker_params = %{
-  #       tracker_url: tracker_url,
-  #       info_hash: info_hash,
-  #       compact: 1,
-  #       num_want: nil
-  #     }
+    test_pid = self()
 
-  #     {:ok, http_tracker_pid} = HTTPTracker.start_link(tracker_params: tracker_params)
+    with_mock HTTPoison,
+      get: fn tracker_url, _headers, _opts ->
+        query_params = tracker_url |> String.split("?") |> Enum.at(1) |> URI.decode_query()
 
-  #     expected_query_params = %{
-  #       info_hash: info_hash,
-  #       peer_id: stats.peer_id,
-  #       port: stats.port,
-  #       uploaded: stats.uploaded,
-  #       downloaded: stats.downloaded,
-  #       left: stats.left,
-  #       compact: 1,
-  #       key: key
-  #     }
+        cond do
+          Map.get(query_params, "event") === Tracker.started().value ->
+            send(test_pid, :started)
 
-  #     # stop the GenServer in order to invoke terminate callback that should send stop event to tracker
-  #     :ok = GenServer.stop(http_tracker_pid)
+          Map.get(query_params, "event") === Tracker.completed().value ->
+            send(test_pid, :completed)
 
-  #     qp_with_start_event =
-  #       expected_query_params
-  #       |> Map.put(:event, Tracker.started().value)
-  #       |> URI.encode_query()
+          Map.get(query_params, "event") === Tracker.completed().value ->
+            send(test_pid, :completed)
+        end
 
-  #     # the first request is sent with start event
-  #     assert_called_exactly(HTTPoison.get("#{tracker_url}?#{qp_with_start_event}", :_, :_), 1)
+        {:ok, mock_response} =
+          Serializer.encode(%{tracker_resp | "min interval" => 1, "interval" => 1})
 
-  #     qp_with_stopped_event =
-  #       expected_query_params
-  #       |> Map.put(:event, Tracker.stopped().value)
-  #       |> URI.encode_query()
+        {:ok, %HTTPoison.Response{status_code: 200, body: mock_response}}
+      end do
+      tracker_params = %{
+        tracker_url: tracker_url,
+        info_hash: info_hash,
+        compact: 1,
+        num_want: nil
+      }
 
-  #     # the second request is sent with stop event on process shutdown
-  #     assert_called_exactly(HTTPoison.get("#{tracker_url}?#{qp_with_stopped_event}", :_, :_), 1)
-  #   end
-  # end
+      {:ok, http_tracker_pid} = HTTPTracker.start_link(tracker_params: tracker_params)
+      tracker_info = HTTPTracker.get_tracker_info(http_tracker_pid)
+
+      assert_receive :started, 2_000
+
+      assert_receive :completed, 2_000
+
+      # # stop the GenServer in order to invoke terminate callback that should send stop event to tracker
+      # :ok = GenServer.stop(http_tracker_pid)
+
+      # qp_with_start_event =
+      #   expected_query_params
+      #   |> Map.put(:event, Tracker.started().value)
+      #   |> URI.encode_query()
+
+      # # the first request is sent with start event
+      # assert_called_exactly(HTTPoison.get("#{tracker_url}?#{qp_with_start_event}", :_, :_), 1)
+
+      # qp_with_stopped_event =
+      #   expected_query_params
+      #   |> Map.put(:event, Tracker.stopped().value)
+      #   |> URI.encode_query()
+
+      # # the second request is sent with stop event on process shutdown
+      # assert_called_exactly(HTTPoison.get("#{tracker_url}?#{qp_with_stopped_event}", :_, :_), 1)
+    end
+  end
 
   test "ensure HTTPTracker fetch fails on not 200 status code", %{
     tracker_url: tracker_url,

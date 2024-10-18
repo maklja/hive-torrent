@@ -114,6 +114,9 @@ defmodule HiveTorrent.HTTPTracker do
           "Received tracker(#{tracker_params.tracker_url}) data: #{inspect(tracker_data)}"
         )
 
+        if next_event === Tracker.completed().value,
+          do: StatsStorage.completed(tracker_params.info_hash, tracker_params.tracker_url)
+
         TrackerStorage.put(tracker_data)
         timeout_id = schedule_fetch(tracker_data)
 
@@ -187,9 +190,10 @@ defmodule HiveTorrent.HTTPTracker do
     Process.send_after(self(), :schedule_announce, interval * 1_000)
   end
 
-  defp cancel_scheduled_time(timeout_ref) when is_reference(timeout_ref) do
-    Process.cancel_timer(timeout_ref)
-  end
+  defp cancel_scheduled_time(timeout_ref) when is_reference(timeout_ref),
+    do: Process.cancel_timer(timeout_ref)
+
+  defp cancel_scheduled_time(nil), do: :ok
 
   @spec fetch_tracker_data(map()) :: {:ok, Tracker.t()} | {:error, String.t()}
   defp fetch_tracker_data(%{
@@ -227,7 +231,6 @@ defmodule HiveTorrent.HTTPTracker do
 
     url = "#{tracker_url}?#{URI.encode_query(query_params)}"
     response = HTTPoison.get(url, [{"Accept", "text/plain"}], timeout: timeout)
-
     handle_tracker_response(response, tracker_url, info_hash)
   end
 

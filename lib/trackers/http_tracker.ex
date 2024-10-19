@@ -253,13 +253,15 @@ defmodule HiveTorrent.HTTPTracker do
   defp process_tracker_response(tracker_url, info_hash, response_body) do
     with {:ok, tracker_state} <- Parser.parse(response_body),
          {:ok, peers_payload} <- Map.fetch(tracker_state, "peers"),
-         {:ok, interval} <- Map.fetch(tracker_state, "interval"),
+         {:ok, interval} when interval > 0 <- Map.fetch(tracker_state, "interval"),
          complete <- Map.get(tracker_state, "complete"),
          downloaded <- Map.get(tracker_state, "downloaded"),
          incomplete <- Map.get(tracker_state, "incomplete"),
-         min_interval = Map.get(tracker_state, "min interval") do
+         min_interval <- Map.get(tracker_state, "min interval") do
       # TODO handle not compact
       peers = Tracker.parse_peers(peers_payload)
+
+      min_interval = if min_interval > 0, do: min_interval, else: nil
 
       {:ok,
        %Tracker{

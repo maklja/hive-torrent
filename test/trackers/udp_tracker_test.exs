@@ -1,11 +1,11 @@
 defmodule HiveTorrent.UDPTrackerTest do
   use ExUnit.Case, async: false
 
-  import Mock
+  # import Mock
 
   doctest HiveTorrent.UDPTracker
 
-  @mock_updated_date DateTime.now!("Etc/UTC")
+  # @mock_updated_date DateTime.now!("Etc/UTC")
 
   # setup_with_mocks([
   #   {DateTime, [:passthrough],

@@ -87,8 +87,12 @@ defmodule HiveTorrent.TrackerMocks do
     }
   end
 
-  defp create_ip() do
+  def create_ip() do
     {:rand.uniform(255), :rand.uniform(255), :rand.uniform(255), :rand.uniform(255)}
+  end
+
+  def create_port() do
+    :rand.uniform(65_536)
   end
 
   defp ip_to_string(ip),
@@ -97,8 +101,4 @@ defmodule HiveTorrent.TrackerMocks do
       |> Tuple.to_list()
       |> Enum.map(&to_string/1)
       |> Enum.join(".")
-
-  defp create_port() do
-    :rand.uniform(65_536)
-  end
 end

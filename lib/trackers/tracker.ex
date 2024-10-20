@@ -65,7 +65,7 @@ defmodule HiveTorrent.Tracker do
          <<>>,
          peers
        ),
-       do: Enum.group_by(peers, &elem(&1, 0), &elem(&1, 1))
+       do: {:ok, Enum.group_by(peers, &elem(&1, 0), &elem(&1, 1))}
 
   defp parse_IPv4_peers(
          <<ip_bin::binary-size(4), port_bin::binary-size(2), other_peers::binary>>,
@@ -76,4 +76,6 @@ defmodule HiveTorrent.Tracker do
 
     parse_IPv4_peers(other_peers, [{ip, port} | peers])
   end
+
+  defp parse_IPv4_peers(_invalid_peers_resp, _peers), do: {:error, "Failed to parse IPv4 peers."}
 end

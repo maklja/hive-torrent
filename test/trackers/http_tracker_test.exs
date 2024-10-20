@@ -108,6 +108,40 @@ defmodule HiveTorrent.HttpTrackerTest do
     end
   end
 
+  test "ensure HTTPTracker fail when peers payload is invalid", %{
+    tracker_url: tracker_url,
+    info_hash: info_hash
+  } do
+    {tracker_resp, _expected_peers} = http_tracker_response()
+
+    with_mock HTTPoison,
+      get: fn _tracker_url, _headers, _opts ->
+        # corrupt the payload peers format in order to force parse to fail
+        invalid_tracker_resp =
+          Map.update!(tracker_resp, "peers", fn valid_peers ->
+            valid_peers <> <<:rand.uniform(255)::8>>
+          end)
+
+        {:ok, mock_response} = Serializer.encode(invalid_tracker_resp)
+        {:ok, %HTTPoison.Response{status_code: 200, body: mock_response}}
+      end do
+      tracker_params = %{
+        tracker_url: tracker_url,
+        info_hash: info_hash,
+        compact: 1,
+        num_want: nil
+      }
+
+      {:ok, http_tracker_pid} = HTTPTracker.start_link(tracker_params: tracker_params)
+      tracker_info = HTTPTracker.get_tracker_info(http_tracker_pid)
+
+      assert tracker_info.error == "Invalid tracker response body."
+      assert tracker_info.tracker_data == nil
+      assert TrackerStorage.get(tracker_url) == :error
+      assert Registry.count(HiveTorrent.TrackerRegistry) == 1
+    end
+  end
+
   test "ensure HTTPTracker sends complete event on download completed", %{
     tracker_url: tracker_url,
     info_hash: info_hash,

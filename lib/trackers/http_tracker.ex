@@ -183,11 +183,14 @@ defmodule HiveTorrent.HTTPTracker do
   end
 
   defp schedule_fetch(tracker_data) do
-    interval =
-      Map.get(tracker_data, :min_interval) ||
-        Map.get(tracker_data, :interval, @default_interval)
+    min_interval = Map.get(tracker_data, :min_interval)
 
-    Process.send_after(self(), :schedule_announce, interval * 1_000)
+    interval =
+      Map.get(tracker_data, :interval, @default_interval)
+
+    interval = min(min_interval, interval) * 1_000
+
+    Process.send_after(self(), :schedule_announce, interval)
   end
 
   defp cancel_scheduled_time(timeout_ref) when is_reference(timeout_ref),
@@ -253,13 +256,13 @@ defmodule HiveTorrent.HTTPTracker do
   defp process_tracker_response(tracker_url, info_hash, response_body) do
     with {:ok, tracker_state} <- Parser.parse(response_body),
          {:ok, peers_payload} <- Map.fetch(tracker_state, "peers"),
+         {:ok, peers} <- Tracker.parse_peers(peers_payload),
          {:ok, interval} when interval > 0 <- Map.fetch(tracker_state, "interval"),
          complete <- Map.get(tracker_state, "complete"),
          downloaded <- Map.get(tracker_state, "downloaded"),
          incomplete <- Map.get(tracker_state, "incomplete"),
          min_interval <- Map.get(tracker_state, "min interval") do
       # TODO handle not compact
-      peers = Tracker.parse_peers(peers_payload)
 
       min_interval = if min_interval > 0, do: min_interval, else: nil
 

@@ -192,7 +192,7 @@ defmodule HiveTorrent.UDPTracker do
          <<interval::32, leechers::32, seeders::32, address_list::binary>>,
          %{tracker_params: tracker_params} = state
        ) do
-    peers = Tracker.parse_peers(address_list)
+    {:ok, peers} = Tracker.parse_peers(address_list)
 
     tracker_data =
       %Tracker{

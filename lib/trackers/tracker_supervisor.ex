@@ -31,13 +31,15 @@ defmodule HiveTorrent.TrackerSupervisor do
   end
 
   defp start_http_tracker(tracker_params) do
-    spec = {HiveTorrent.HTTPTracker, tracker_params}
+    spec = {HiveTorrent.HTTPTracker, tracker_params: tracker_params}
 
     DynamicSupervisor.start_child(__MODULE__, spec)
   end
 
   defp start_udp_tracker(tracker_params) do
-    spec = {HiveTorrent.UDPTracker, tracker_params}
+    spec =
+      {HiveTorrent.UDPTracker,
+       tracker_params: tracker_params, client: HiveTorrent.UDPTrackerSocket}
 
     DynamicSupervisor.start_child(__MODULE__, spec)
   end

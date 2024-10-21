@@ -26,14 +26,26 @@ defmodule HiveTorrent.UDPTracker do
     GenServer.cast(pid, {:broadcast_error, transaction_id, error_message})
   end
 
-  def start_link(tracker_params) when is_map(tracker_params) do
-    GenServer.start_link(__MODULE__, tracker_params)
+  def start_link(opts) do
+    tracker_params = Keyword.fetch!(opts, :tracker_params)
+    client = Keyword.fetch!(opts, :client)
+    timeout = Keyword.get(opts, :timeout, @default_timeout_interval)
+
+    GenServer.start_link(__MODULE__,
+      tracker_params: tracker_params,
+      client: client,
+      timeout: timeout
+    )
   end
 
   # Server Callbacks
 
   @impl true
-  def init(tracker_params) do
+  def init(
+        tracker_params: tracker_params,
+        client: client,
+        timeout: timeout
+      ) do
     Logger.info("Started tracker #{tracker_params.tracker_url}.")
 
     tracker_params = tracker_params |> Map.put_new(:num_want, -1)
@@ -46,8 +58,10 @@ defmodule HiveTorrent.UDPTracker do
       transaction_id: nil,
       error: nil,
       timeout_id: nil,
+      timeout: timeout * 1_000,
       event: Tracker.started().key,
-      key: :rand.uniform(0xFFFFFFFF)
+      key: :rand.uniform(0xFFFFFFFF),
+      client: client
     }
 
     {:ok, state, {:continue, :announce}}
@@ -61,11 +75,11 @@ defmodule HiveTorrent.UDPTracker do
   end
 
   @impl true
-  def handle_info(:schedule_announce, %{tracker_params: tracker_params} = state) do
+  def handle_info(:schedule_announce, %{tracker_params: tracker_params, timeout: timeout} = state) do
     case url_to_inet_address(tracker_params.tracker_url) do
       {:ok, ip, port} ->
         transaction_id = send_announce_message(ip, port, state)
-        timeout_id = schedule_timeout()
+        timeout_id = schedule_timeout(timeout)
 
         Logger.info(
           "Sent message with transaction id #{Tracker.format_transaction_id(transaction_id)}."
@@ -86,7 +100,7 @@ defmodule HiveTorrent.UDPTracker do
         Logger.error(message)
         schedule_fetch(nil)
 
-        {:noreply, state}
+        {:noreply, %{state | error: message}}
     end
   end
 
@@ -146,7 +160,7 @@ defmodule HiveTorrent.UDPTracker do
         "Received error message from transaction #{Tracker.format_transaction_id(msg_transaction_id)}, reason #{error_message}"
       )
 
-      cancel_scheduled_time(timeout_id)
+      cancel_schedule_timeout(timeout_id)
       schedule_fetch(tracker_data)
 
       {:noreply, %{state | error: error_message, timeout_id: nil, transaction_id: nil}}
@@ -157,7 +171,7 @@ defmodule HiveTorrent.UDPTracker do
   def terminate(_reason, %{tracker_params: tracker_params, timeout_id: timeout_id} = state) do
     Logger.info("Terminating tracker #{tracker_params.tracker_url}")
 
-    cancel_scheduled_time(timeout_id)
+    cancel_schedule_timeout(timeout_id)
 
     case url_to_inet_address(tracker_params.tracker_url) do
       {:ok, ip, port} ->
@@ -202,7 +216,7 @@ defmodule HiveTorrent.UDPTracker do
           TrackerStorage.put(tracker_data)
       end
 
-    cancel_scheduled_time(state.timeout_id)
+    cancel_schedule_timeout(state.timeout_id)
     schedule_fetch(tracker_data)
 
     %{
@@ -221,7 +235,8 @@ defmodule HiveTorrent.UDPTracker do
          %{
            tracker_params: tracker_params,
            event: event,
-           key: key
+           key: key,
+           client: client
          }
        ) do
     %{info_hash: info_hash, tracker_url: tracker_url, num_want: num_want} = tracker_params
@@ -259,14 +274,14 @@ defmodule HiveTorrent.UDPTracker do
       <<info_hash::binary, peer_id::binary, downloaded::64, left::64, uploaded::64,
         next_event::32, peer_ip::32, key::32, num_want::32, peer_port::16>>
 
-    HiveTorrent.UDPServer.send_announce_message(announce_message, ip, port)
+    client.send_announce_message(announce_message, ip, port)
   end
 
-  defp schedule_timeout() do
-    Process.send_after(self(), :timeout, @default_timeout_interval * 1_000)
+  defp schedule_timeout(timeout) do
+    Process.send_after(self(), :timeout, timeout)
   end
 
-  defp cancel_scheduled_time(timeout_ref) when is_reference(timeout_ref) do
+  defp cancel_schedule_timeout(timeout_ref) do
     Process.cancel_timer(timeout_ref)
   end
 

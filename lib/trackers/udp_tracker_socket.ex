@@ -1,3 +1,11 @@
+defmodule HiveTorrent.TrackerClient do
+  @callback send_announce_message(
+              binary(),
+              {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()},
+              non_neg_integer()
+            ) :: pos_integer()
+end
+
 defmodule HiveTorrent.UDPTrackerSocket do
   @moduledoc """
   This module implements a UDP socket for communication with a Torrent tracker.
@@ -9,6 +17,8 @@ defmodule HiveTorrent.UDPTrackerSocket do
   Any errors encountered during message sending or response parsing are also forwarded to the callback.
   """
   use GenServer
+
+  @behaviour HiveTorrent.TrackerClient
 
   require Logger
 
@@ -71,6 +81,7 @@ defmodule HiveTorrent.UDPTrackerSocket do
       ...> end])
       iex> _transaction_id = HiveTorrent.UDPTrackerSocket.send_announce_message(<<"test"::binary>>, {192, 168, 0, 1}, 6888)
   """
+  @impl true
   def send_announce_message(message, ip, port) do
     GenServer.call(__MODULE__, {:send_announce, message, ip, port})
   end
@@ -85,7 +96,7 @@ defmodule HiveTorrent.UDPTrackerSocket do
 
   @impl true
   def handle_call({:send_announce, message, ip, port}, _from, state) do
-    transaction_id = :rand.uniform(0xFFFFFFFF)
+    transaction_id = Tracker.create_transaction_id()
 
     transaction_data = %{
       id: transaction_id,

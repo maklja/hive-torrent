@@ -13,7 +13,8 @@ defmodule HiveTorrent.UDPTracker do
   @default_error_interval 30
   @default_timeout_interval 30
 
-  def broadcast_announce_message(pid, transaction_id, message) do
+  def broadcast_announce_message(pid, transaction_id, message)
+      when is_pid(pid) and is_integer(transaction_id) and is_binary(message) do
     GenServer.cast(pid, {:broadcast_announce, transaction_id, message})
   end
 
@@ -24,6 +25,16 @@ defmodule HiveTorrent.UDPTracker do
 
   def broadcast_error_message(pid, transaction_id, error_message) do
     GenServer.cast(pid, {:broadcast_error, transaction_id, error_message})
+  end
+
+  @doc """
+  Returns the current information held in the state.
+
+  This includes the parameters sent to the tracker, the last response received, and the last error encountered.
+  If the response was not successfully retrieved, the value will be `nil`. Similarly, if no error occurred, `nil` will be returned for the error.
+  """
+  def get_tracker_info(pid) when is_pid(pid) do
+    GenServer.call(pid, :tracker_info)
   end
 
   def start_link(opts) do
@@ -60,7 +71,7 @@ defmodule HiveTorrent.UDPTracker do
       timeout_id: nil,
       timeout: timeout * 1_000,
       event: Tracker.started().key,
-      key: :rand.uniform(0xFFFFFFFF),
+      key: Tracker.create_transaction_id(),
       client: client
     }
 
@@ -76,7 +87,7 @@ defmodule HiveTorrent.UDPTracker do
 
   @impl true
   def handle_info(:schedule_announce, %{tracker_params: tracker_params, timeout: timeout} = state) do
-    case url_to_inet_address(tracker_params.tracker_url) do
+    case Tracker.udp_url_to_inet_address(tracker_params.tracker_url) do
       {:ok, ip, port} ->
         transaction_id = send_announce_message(ip, port, state)
         timeout_id = schedule_timeout(timeout)
@@ -122,6 +133,11 @@ defmodule HiveTorrent.UDPTracker do
          error: nil,
          timeout_id: nil
      }}
+  end
+
+  @impl true
+  def handle_call(:tracker_info, _from, state) do
+    {:reply, state, state}
   end
 
   @impl true
@@ -173,7 +189,7 @@ defmodule HiveTorrent.UDPTracker do
 
     cancel_schedule_timeout(timeout_id)
 
-    case url_to_inet_address(tracker_params.tracker_url) do
+    case Tracker.udp_url_to_inet_address(tracker_params.tracker_url) do
       {:ok, ip, port} ->
         transaction_id = send_announce_message(ip, port, %{state | event: Tracker.stopped().key})
 
@@ -189,41 +205,64 @@ defmodule HiveTorrent.UDPTracker do
   end
 
   defp process_announce_message(
-         <<interval::32, leechers::32, seeders::32, address_list::binary>>,
+         <<interval::unsigned-integer-size(32), leechers::unsigned-integer-size(32),
+           seeders::unsigned-integer-size(32), address_list::binary>>,
          %{tracker_params: tracker_params} = state
-       ) do
-    {:ok, peers} = Tracker.parse_peers(address_list)
+       )
+       when interval > 0 do
+    cancel_schedule_timeout(state.timeout_id)
 
-    tracker_data =
-      %Tracker{
-        info_hash: tracker_params.info_hash,
-        tracker_url: tracker_params.tracker_url,
-        complete: seeders,
-        downloaded: nil,
-        incomplete: leechers,
-        interval: interval,
-        min_interval: nil,
-        peers: peers,
-        updated_at: DateTime.utc_now()
+    with {:ok, peers} <- Tracker.parse_peers(address_list),
+         tracker_data <-
+           TrackerStorage.put(%Tracker{
+             info_hash: tracker_params.info_hash,
+             tracker_url: tracker_params.tracker_url,
+             complete: seeders,
+             downloaded: nil,
+             incomplete: leechers,
+             interval: interval,
+             min_interval: nil,
+             peers: peers,
+             updated_at: DateTime.utc_now()
+           }) do
+      schedule_fetch(tracker_data)
+
+      %{
+        state
+        | tracker_data: tracker_data,
+          event: Tracker.none().key,
+          error: nil,
+          transaction_id: nil,
+          timeout_id: nil
       }
+    else
+      {:error, reason} ->
+        Logger.error(reason)
+        schedule_fetch(state.tracker_data)
 
-    tracker_data =
-      case TrackerStorage.get(tracker_params.tracker_url) do
-        {:ok, %Tracker{peers: old_peers}} ->
-          TrackerStorage.put(%{tracker_data | peers: Map.merge(old_peers, peers)})
+        %{
+          state
+          | error: reason,
+            transaction_id: nil,
+            timeout_id: nil
+        }
+    end
+  end
 
-        :error ->
-          TrackerStorage.put(tracker_data)
-      end
+  defp process_announce_message(
+         invalid_message,
+         state
+       ) do
+    Logger.error(
+      "Invalid message format for announce response, message #{inspect(invalid_message)}."
+    )
 
     cancel_schedule_timeout(state.timeout_id)
-    schedule_fetch(tracker_data)
+    schedule_fetch(state.tracker_data)
 
     %{
       state
-      | tracker_data: tracker_data,
-        event: Tracker.none().key,
-        error: nil,
+      | error: "Invalid message format for announce response.",
         transaction_id: nil,
         timeout_id: nil
     }
@@ -271,17 +310,24 @@ defmodule HiveTorrent.UDPTracker do
     peer_ip = peer_ip || 0
 
     announce_message =
-      <<info_hash::binary, peer_id::binary, downloaded::64, left::64, uploaded::64,
-        next_event::32, peer_ip::32, key::32, num_want::32, peer_port::16>>
+      <<info_hash::binary-size(20), peer_id::binary-size(20), downloaded::64, left::64,
+        uploaded::64, next_event::32, peer_ip::32, key::32, num_want::32, peer_port::16>>
 
-    client.send_announce_message(announce_message, ip, port)
+    transaction_id = client.send_announce_message(announce_message, ip, port)
+
+    if next_event === Tracker.completed().key,
+      do: StatsStorage.completed(tracker_params.info_hash, tracker_params.tracker_url)
+
+    transaction_id
   end
 
   defp schedule_timeout(timeout) do
     Process.send_after(self(), :timeout, timeout)
   end
 
-  defp cancel_schedule_timeout(timeout_ref) do
+  defp cancel_schedule_timeout(nil), do: :ok
+
+  defp cancel_schedule_timeout(timeout_ref) when is_reference(timeout_ref) do
     Process.cancel_timer(timeout_ref)
   end
 
@@ -290,44 +336,8 @@ defmodule HiveTorrent.UDPTracker do
   end
 
   defp schedule_fetch(tracker_data) do
-    interval =
-      Map.get(tracker_data, :min_interval) ||
-        Map.get(tracker_data, :interval, @default_interval)
+    interval = Map.get(tracker_data, :interval, @default_interval)
 
     Process.send_after(self(), :schedule_announce, interval * 1_000)
-  end
-
-  defp url_to_inet_address(url) when is_binary(url) do
-    case URI.parse(url) do
-      %URI{host: nil} ->
-        {:fatal_error, "Invalid URL: Host not found with tracker #{url}."}
-
-      %URI{port: nil} ->
-        {:fatal_error, "Invalid URL: Port not found with tracker #{url}."}
-
-      %URI{host: host, port: port} ->
-        host_to_inet_address(host, port)
-    end
-  end
-
-  defp host_to_inet_address(host, port) do
-    case :inet.parse_address(String.to_charlist(host)) do
-      {:ok, ip_address} ->
-        {:ok, ip_address, port}
-
-      {:error, :einval} ->
-        resolve_hostname_to_inet_address(host, port)
-    end
-  end
-
-  defp resolve_hostname_to_inet_address(hostname, port) do
-    # TODO handle IPv6
-    case :inet.getaddr(String.to_charlist(hostname), :inet) do
-      {:ok, ip_address} ->
-        {:ok, ip_address, port}
-
-      {:error, reason} ->
-        {:error, "Failed to resolve hostname, reason #{reason} with tracker #{hostname}."}
-    end
   end
 end

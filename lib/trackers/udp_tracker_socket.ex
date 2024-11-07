@@ -85,7 +85,7 @@ defmodule HiveTorrent.UDPTrackerSocket do
 
   @impl true
   def handle_call({:send_announce, message, ip, port}, _from, state) do
-    transaction_id = :rand.uniform(0xFFFFFFFF)
+    transaction_id = Tracker.create_transaction_id()
 
     transaction_data = %{
       id: transaction_id,

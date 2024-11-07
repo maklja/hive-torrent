@@ -49,6 +49,8 @@ defmodule HiveTorrent.Tracker do
     end
   end
 
+  def create_transaction_id(), do: :rand.uniform(0xFFFFFFFF)
+
   def parse_peers(peers_binary_payload) when is_binary(peers_binary_payload) do
     parse_IPv4_peers(peers_binary_payload)
   end
@@ -78,4 +80,41 @@ defmodule HiveTorrent.Tracker do
   end
 
   defp parse_IPv4_peers(_invalid_peers_resp, _peers), do: {:error, "Failed to parse IPv4 peers."}
+
+  def udp_url_to_inet_address("udp://" <> _rest = url) do
+    case URI.parse(url) do
+      %URI{host: nil} ->
+        {:fatal_error, "Invalid URL: Host not found with tracker #{url}."}
+
+      %URI{port: nil} ->
+        {:fatal_error, "Invalid URL: Port not found with tracker #{url}."}
+
+      %URI{host: host, port: port} ->
+        host_to_inet_address(host, port)
+    end
+  end
+
+  def udp_url_to_inet_address(invalid_url),
+    do: {:fatal_error, "Invalid URL: Port not found with tracker #{inspect(invalid_url)}."}
+
+  defp host_to_inet_address(host, port) do
+    case :inet.parse_address(String.to_charlist(host)) do
+      {:ok, ip_address} ->
+        {:ok, ip_address, port}
+
+      {:error, :einval} ->
+        resolve_hostname_to_inet_address(host, port)
+    end
+  end
+
+  defp resolve_hostname_to_inet_address(hostname, port) do
+    # TODO handle IPv6
+    case :inet.getaddr(String.to_charlist(hostname), :inet) do
+      {:ok, ip_address} ->
+        {:ok, ip_address, port}
+
+      {:error, reason} ->
+        {:error, "Failed to resolve hostname, reason #{reason} with tracker #{hostname}."}
+    end
+  end
 end

@@ -1,7 +1,41 @@
 defmodule HiveTorrent.TrackerMocks do
   alias HiveTorrent.StatsStorage
 
-  def http_tracker_response() do
+  def udp_tracker_announce_response() do
+    interval = Faker.random_between(0, 2_000)
+    leechers = Faker.random_between(0, 100)
+    seeders = Faker.random_between(0, 100)
+    {peers, expected_peers} = create_peers_response()
+
+    tracker_response_mock =
+      <<interval::unsigned-integer-size(32), leechers::unsigned-integer-size(32),
+        seeders::unsigned-integer-size(32)>> <> peers
+
+    {tracker_response_mock,
+     %{
+       interval: interval,
+       leechers: leechers,
+       seeders: seeders,
+       peers: expected_peers
+     }}
+  end
+
+  def http_tracker_announce_response() do
+    {peers, expected_peers} = create_peers_response()
+
+    tracker_response_mock = %{
+      "complete" => Faker.random_between(0, 100),
+      "downloaded" => Faker.random_between(0, 9999),
+      "incomplete" => Faker.random_between(0, 100),
+      "interval" => Faker.random_between(0, 2_000),
+      "min interval" => Faker.random_between(0, 1_000),
+      "peers" => peers
+    }
+
+    {tracker_response_mock, expected_peers}
+  end
+
+  def create_peers_response() do
     ip_addresses =
       1..:rand.uniform(10)
       |> Range.to_list()
@@ -28,25 +62,18 @@ defmodule HiveTorrent.TrackerMocks do
       end)
       |> Enum.reduce(fn address, acc -> address <> acc end)
 
-    tracker_response_mock = %{
-      "complete" => :rand.uniform(100),
-      "downloaded" => :rand.uniform(9999),
-      "incomplete" => :rand.uniform(100),
-      "interval" => :rand.uniform(2000),
-      "min interval" => :rand.uniform(1000),
-      "peers" => peers
-    }
-
-    {tracker_response_mock, expected_address}
+    {peers, expected_address}
   end
 
   def create_http_tracker_announce_url() do
-    protocol = ["http://", "https://"]
-    domains = ["com", "io", "org"]
-    letters = Enum.to_list(?A..?Z) ++ Enum.to_list(?a..?z) ++ Enum.to_list(?0..?9) ++ [?-, ?_]
-    url_base = Enum.shuffle(letters) |> Enum.take(:rand.uniform(15))
-    port = :rand.uniform(0xFFFF)
-    "#{Enum.random(protocol)}#{url_base}.#{Enum.random(domains)}:#{port}/announce"
+    port = create_port()
+    "#{Faker.Internet.url()}:#{port}/announce"
+  end
+
+  @spec create_udp_tracker_announce_url() :: <<_::64, _::_*8>>
+  def create_udp_tracker_announce_url() do
+    port = create_port()
+    "udp://#{Faker.Internet.domain_name()}:#{port}/announce"
   end
 
   def create_info_hash(),
@@ -78,9 +105,9 @@ defmodule HiveTorrent.TrackerMocks do
       info_hash: info_hash,
       # TODO later with random func that will be used in app
       peer_id: "12345678901234567890",
-      port: :rand.uniform(65_536),
-      uploaded: :rand.uniform(1_000_000),
-      downloaded: piece_size * :rand.uniform(100),
+      port: create_port(),
+      uploaded: Faker.random_between(0, 1_000_000),
+      downloaded: piece_size * Faker.random_between(0, 100),
       left: left,
       completed: [],
       pieces: pieces
@@ -88,11 +115,14 @@ defmodule HiveTorrent.TrackerMocks do
   end
 
   def create_ip() do
-    {:rand.uniform(255), :rand.uniform(255), :rand.uniform(255), :rand.uniform(255)}
+    Faker.Internet.ip_v4_address()
+    |> String.split(".")
+    |> Enum.map(&String.to_integer/1)
+    |> List.to_tuple()
   end
 
   def create_port() do
-    :rand.uniform(65_536)
+    Faker.random_between(1024, 65535)
   end
 
   defp ip_to_string(ip),

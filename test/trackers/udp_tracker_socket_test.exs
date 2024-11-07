@@ -4,6 +4,7 @@ defmodule HiveTorrent.UDPTrackerSocketTest do
   doctest HiveTorrent.UDPTrackerSocket
 
   import Mock
+  import HiveTorrent.TrackerMocks
 
   alias HiveTorrent.UDPTrackerSocket
   alias HiveTorrent.Tracker
@@ -20,12 +21,6 @@ defmodule HiveTorrent.UDPTrackerSocketTest do
 
   @message_body <<:rand.uniform(0xFFFFFFFFFFFFFFFF)::64>>
 
-  @port :rand.uniform(0xFFFF)
-
-  @ip {:rand.uniform(0xFF), :rand.uniform(0xFF), :rand.uniform(0xFF), :rand.uniform(0xFF)}
-
-  @req_body <<:rand.uniform(0xFFFFFFFFFFFFFFFF)::64>>
-
   setup_with_mocks([
     {:gen_udp, [:unstick, :passthrough],
      [open: &open_socket_success/2, close: &close_socket_success/1]}
@@ -38,13 +33,16 @@ defmodule HiveTorrent.UDPTrackerSocketTest do
                  [:unstick, :passthrough],
                  send: &send_error_message/4 do
     test_pid = self()
+    ip = create_ip()
+    port = create_port()
+    req_body = <<:rand.uniform(0xFFFFFFFFFFFFFFFF)::64>>
 
     message_callback = fn message_type, transaction_id, data ->
       send(test_pid, {message_type, transaction_id, data})
     end
 
-    _pid = start_supervised!({UDPTrackerSocket, port: @port, message_callback: message_callback})
-    transaction_id = UDPTrackerSocket.send_announce_message(@req_body, @ip, @port)
+    _pid = start_supervised!({UDPTrackerSocket, port: port, message_callback: message_callback})
+    transaction_id = UDPTrackerSocket.send_announce_message(req_body, ip, port)
 
     error_message =
       "Received error response for transaction #{Tracker.format_transaction_id(transaction_id)}, reason Invalid request."
@@ -57,13 +55,16 @@ defmodule HiveTorrent.UDPTrackerSocketTest do
                  [:unstick, :passthrough],
                  send: &send_invalid_message/4 do
     test_pid = self()
+    ip = create_ip()
+    port = create_port()
+    req_body = <<:rand.uniform(0xFFFFFFFFFFFFFFFF)::64>>
 
     message_callback = fn message_type, transaction_id, data ->
       send(test_pid, {message_type, transaction_id, data})
     end
 
-    _pid = start_supervised!({UDPTrackerSocket, port: @port, message_callback: message_callback})
-    transaction_id = UDPTrackerSocket.send_announce_message(@req_body, @ip, @port)
+    _pid = start_supervised!({UDPTrackerSocket, port: port, message_callback: message_callback})
+    transaction_id = UDPTrackerSocket.send_announce_message(req_body, ip, port)
 
     error_message =
       "Requested action 0 is not matched with received action 100 for transaction #{Tracker.format_transaction_id(transaction_id)}."
@@ -76,13 +77,16 @@ defmodule HiveTorrent.UDPTrackerSocketTest do
                  [:unstick, :passthrough],
                  send: &send_message/4 do
     test_pid = self()
+    ip = create_ip()
+    port = create_port()
+    req_body = <<:rand.uniform(0xFFFFFFFFFFFFFFFF)::64>>
 
     message_callback = fn message_type, transaction_id, data ->
       send(test_pid, {message_type, transaction_id, data})
     end
 
-    _pid = start_supervised!({UDPTrackerSocket, port: @port, message_callback: message_callback})
-    transaction_id = UDPTrackerSocket.send_announce_message(@req_body, @ip, @port)
+    _pid = start_supervised!({UDPTrackerSocket, port: port, message_callback: message_callback})
+    transaction_id = UDPTrackerSocket.send_announce_message(req_body, ip, port)
 
     assert_receive {:announce, ^transaction_id, @message_body}
   end
@@ -94,13 +98,16 @@ defmodule HiveTorrent.UDPTrackerSocketTest do
                  close: &close_socket_success/1,
                  send: &sending_error/4 do
     test_pid = self()
+    ip = create_ip()
+    port = create_port()
+    req_body = <<:rand.uniform(0xFFFFFFFFFFFFFFFF)::64>>
 
     message_callback = fn message_type, transaction_id, data ->
       send(test_pid, {message_type, transaction_id, data})
     end
 
-    _pid = start_supervised!({UDPTrackerSocket, port: @port, message_callback: message_callback})
-    transaction_id = UDPTrackerSocket.send_announce_message(@req_body, @ip, @port)
+    _pid = start_supervised!({UDPTrackerSocket, port: port, message_callback: message_callback})
+    transaction_id = UDPTrackerSocket.send_announce_message(req_body, ip, port)
 
     assert_receive {:error, ^transaction_id, :failed}
   end
@@ -110,13 +117,16 @@ defmodule HiveTorrent.UDPTrackerSocketTest do
                  [:unstick, :passthrough],
                  send: &sending_unknown_error/4 do
     test_pid = self()
+    ip = create_ip()
+    port = create_port()
+    req_body = <<:rand.uniform(0xFFFFFFFFFFFFFFFF)::64>>
 
     message_callback = fn message_type, transaction_id, data ->
       send(test_pid, {message_type, transaction_id, data})
     end
 
-    _pid = start_supervised!({UDPTrackerSocket, port: @port, message_callback: message_callback})
-    transaction_id = UDPTrackerSocket.send_announce_message(@req_body, @ip, @port)
+    _pid = start_supervised!({UDPTrackerSocket, port: port, message_callback: message_callback})
+    transaction_id = UDPTrackerSocket.send_announce_message(req_body, ip, port)
 
     error_message =
       "Unknown error received on transaction #{Tracker.format_transaction_id(transaction_id)}."
@@ -128,11 +138,13 @@ defmodule HiveTorrent.UDPTrackerSocketTest do
                  :gen_udp,
                  [:unstick, :passthrough],
                  open: &open_socket_error/2 do
+    port = create_port()
+
     message_callback = fn _message_type, _transaction_id, _data ->
       :error
     end
 
-    result = start_supervised({UDPTrackerSocket, port: @port, message_callback: message_callback})
+    result = start_supervised({UDPTrackerSocket, port: port, message_callback: message_callback})
 
     assert elem(result, 0) == :error
   end

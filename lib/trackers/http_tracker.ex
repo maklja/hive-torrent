@@ -66,7 +66,7 @@ defmodule HiveTorrent.HTTPTracker do
       error: nil,
       timeout_id: nil,
       event: Tracker.started().value,
-      key: :rand.uniform(0xFFFFFFFF),
+      key: Tracker.create_transaction_id(),
       timeout: timeout
     }
 

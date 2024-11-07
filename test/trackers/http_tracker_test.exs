@@ -43,7 +43,7 @@ defmodule HiveTorrent.HttpTrackerTest do
     info_hash: info_hash,
     stats: stats
   } do
-    {tracker_resp, expected_peers} = http_tracker__announce_response()
+    {tracker_resp, expected_peers} = http_tracker_announce_response()
 
     expected_tracker_data = %Tracker{
       info_hash: info_hash,
@@ -113,7 +113,7 @@ defmodule HiveTorrent.HttpTrackerTest do
     tracker_url: tracker_url,
     info_hash: info_hash
   } do
-    {tracker_resp, _expected_peers} = http_tracker__announce_response()
+    {tracker_resp, _expected_peers} = http_tracker_announce_response()
 
     with_mock HTTPoison,
       get: fn _tracker_url, _headers, _opts ->
@@ -148,7 +148,7 @@ defmodule HiveTorrent.HttpTrackerTest do
     info_hash: info_hash,
     stats: stats
   } do
-    {tracker_resp, _expected_peers} = http_tracker__announce_response()
+    {tracker_resp, _expected_peers} = http_tracker_announce_response()
 
     # fully completed the download of the file pieces
     Enum.each(stats.pieces, fn {piece_idx, _} ->
@@ -305,7 +305,7 @@ defmodule HiveTorrent.HttpTrackerTest do
     with_mock HTTPoison,
       get: fn _tracker_url, _headers, _opts ->
         {:ok, mock_response} =
-          http_tracker__announce_response()
+          http_tracker_announce_response()
           |> elem(0)
           |> Map.delete("peers")
           |> Serializer.encode()
@@ -337,7 +337,7 @@ defmodule HiveTorrent.HttpTrackerTest do
     with_mock HTTPoison,
       get: fn _tracker_url, _headers, _opts ->
         {:ok, mock_response} =
-          http_tracker__announce_response()
+          http_tracker_announce_response()
           |> elem(0)
           |> Map.delete("interval")
           |> Serializer.encode()
@@ -369,7 +369,7 @@ defmodule HiveTorrent.HttpTrackerTest do
     with_mock HTTPoison,
       get: fn _tracker_url, _headers, _opts ->
         {:ok, mock_response} =
-          http_tracker__announce_response()
+          http_tracker_announce_response()
           |> elem(0)
           |> Map.put("interval", :rand.uniform(100) * -1)
           |> Serializer.encode()
@@ -398,7 +398,7 @@ defmodule HiveTorrent.HttpTrackerTest do
     tracker_url: tracker_url,
     info_hash: info_hash
   } do
-    {tracker_resp, expected_peers} = http_tracker__announce_response()
+    {tracker_resp, expected_peers} = http_tracker_announce_response()
 
     expected_tracker_data = %Tracker{
       info_hash: info_hash,

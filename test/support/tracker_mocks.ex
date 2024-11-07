@@ -20,7 +20,7 @@ defmodule HiveTorrent.TrackerMocks do
      }}
   end
 
-  def http_tracker__announce_response() do
+  def http_tracker_announce_response() do
     {peers, expected_peers} = create_peers_response()
 
     tracker_response_mock = %{

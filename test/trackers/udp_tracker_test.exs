@@ -325,7 +325,7 @@ defmodule HiveTorrent.UDPTrackerTest do
     end
   end
 
-  test "ensure UDPTracker fail when interval in zero", %{
+  test "ensure UDPTracker fail when interval is zero", %{
     tracker_url: tracker_url,
     info_hash: info_hash
   } do

@@ -1,18 +1,16 @@
-defmodule HiveTorrent.HttpTrackerTest do
+defmodule HiveTorrent.HTTPTrackerTest do
   use ExUnit.Case, async: true
 
   import Mock
 
-  alias HiveTorrent.StatsStorage
-  alias HiveTorrent.TrackerStorage
-  alias HiveTorrent.HTTPTracker
+  doctest HiveTorrent.HTTPTracker
+
   alias HiveTorrent.Tracker
+  alias HiveTorrent.ScrapeResponse
+  alias HiveTorrent.HTTPTracker
   alias HiveTorrent.Bencode.Serializer
-  alias HiveTorrent.TrackerRegistry
 
   import HiveTorrent.TrackerMocks
-
-  doctest HiveTorrent.HTTPTracker
 
   @mock_updated_date DateTime.now!("Etc/UTC")
 
@@ -25,417 +23,778 @@ defmodule HiveTorrent.HttpTrackerTest do
   ]) do
     stats = create_stats()
 
-    params = %{
-      tracker_url: create_http_tracker_announce_url(),
-      info_hash: stats.info_hash,
+    {:ok,
+     %{
+       tracker_url: create_http_tracker_announce_url(),
+       info_hash: stats.info_hash,
+       stats: stats
+     }}
+  end
+
+  describe "Announce message" do
+    defp random_announce_event(),
+      do:
+        Enum.random([
+          HTTPTracker.started(),
+          HTTPTracker.stopped(),
+          HTTPTracker.completed(),
+          HTTPTracker.none()
+        ])
+
+    test "ensure HTTPTracker announce successfully fetch the tracker data", %{
+      tracker_url: tracker_url,
+      info_hash: info_hash,
       stats: stats
-    }
+    } do
+      {tracker_resp, expected_peers} = http_tracker_announce_response()
 
-    start_supervised!({TrackerStorage, nil})
-    start_supervised!({Registry, keys: :duplicate, name: TrackerRegistry})
-    start_supervised!({StatsStorage, [stats]})
+      expected_torrent_data = %Tracker{
+        info_hash: info_hash,
+        tracker_url: tracker_url,
+        complete: Map.fetch!(tracker_resp, "complete"),
+        downloaded: Map.fetch!(tracker_resp, "downloaded"),
+        incomplete: Map.fetch!(tracker_resp, "incomplete"),
+        interval: Map.fetch!(tracker_resp, "interval"),
+        min_interval: Map.fetch!(tracker_resp, "min interval"),
+        peers: expected_peers,
+        updated_at: @mock_updated_date
+      }
 
-    {:ok, params}
-  end
+      with_mock HTTPoison,
+        get: fn _tracker_url, _headers, _opts ->
+          {:ok, mock_response} = Serializer.encode(tracker_resp)
+          {:ok, %HTTPoison.Response{status_code: 200, body: mock_response}}
+        end do
+        compact = 1
+        key = :rand.uniform(1_000)
+        ip = create_ip() |> ip_to_string()
+        num_want = -1..1_000 |> Enum.random()
+        event = random_announce_event()
 
-  test "ensure HTTPTracker fetch the tracker data and store it in TrackerStorage", %{
-    tracker_url: tracker_url,
-    info_hash: info_hash,
-    stats: stats
-  } do
-    {tracker_resp, expected_peers} = http_tracker_announce_response()
+        {:ok, torrent_data} =
+          HTTPTracker.send_announce_request(%{
+            tracker_url: tracker_url,
+            info_hash: info_hash,
+            compact: compact,
+            event: event,
+            peer_id: stats.peer_id,
+            ip: ip,
+            key: key,
+            port: stats.port,
+            uploaded: stats.uploaded,
+            downloaded: stats.downloaded,
+            left: stats.left,
+            num_want: num_want
+          })
 
-    expected_tracker_data = %Tracker{
-      info_hash: info_hash,
+        assert torrent_data == expected_torrent_data
+
+        expected_query_params = %{
+          info_hash: info_hash,
+          peer_id: stats.peer_id,
+          port: stats.port,
+          uploaded: stats.uploaded,
+          downloaded: stats.downloaded,
+          left: stats.left,
+          compact: compact,
+          key: key,
+          event: event,
+          ip: ip,
+          numwant: num_want
+        }
+
+        qp = URI.encode_query(expected_query_params)
+
+        assert_called_exactly(HTTPoison.get("#{tracker_url}?#{qp}", :_, :_), 1)
+      end
+    end
+
+    test "ensure HTTPTracker announce returns error when peers payload is invalid", %{
       tracker_url: tracker_url,
-      complete: Map.fetch!(tracker_resp, "complete"),
-      downloaded: Map.fetch!(tracker_resp, "downloaded"),
-      incomplete: Map.fetch!(tracker_resp, "incomplete"),
-      interval: Map.fetch!(tracker_resp, "interval"),
-      min_interval: Map.fetch!(tracker_resp, "min interval"),
-      peers: expected_peers,
-      updated_at: @mock_updated_date
-    }
-
-    with_mock HTTPoison,
-      get: fn _tracker_url, _headers, _opts ->
-        {:ok, mock_response} = Serializer.encode(tracker_resp)
-        {:ok, %HTTPoison.Response{status_code: 200, body: mock_response}}
-      end do
-      tracker_params = %{
-        tracker_url: tracker_url,
-        info_hash: info_hash,
-        compact: 1,
-        num_want: nil
-      }
-
-      {:ok, http_tracker_pid} = HTTPTracker.start_link(tracker_params: tracker_params)
-      tracker_info = HTTPTracker.get_tracker_info(http_tracker_pid)
-      assert tracker_info.tracker_params == tracker_params
-      assert tracker_info.error == nil
-      assert tracker_info.tracker_data == expected_tracker_data
-      assert TrackerStorage.get(tracker_url) == {:ok, expected_tracker_data}
-      assert Registry.count(HiveTorrent.TrackerRegistry) == 1
-
-      expected_query_params = %{
-        info_hash: info_hash,
-        peer_id: stats.peer_id,
-        port: stats.port,
-        uploaded: stats.uploaded,
-        downloaded: stats.downloaded,
-        left: stats.left,
-        compact: 1,
-        key: tracker_info.key
-      }
-
-      # stop the GenServer in order to invoke terminate callback that should send stop event to tracker
-      :ok = GenServer.stop(http_tracker_pid)
-
-      qp_with_start_event =
-        expected_query_params
-        |> Map.put(:event, Tracker.started().value)
-        |> URI.encode_query()
-
-      # the first request is sent with start event
-      assert_called_exactly(HTTPoison.get("#{tracker_url}?#{qp_with_start_event}", :_, :_), 1)
-
-      qp_with_stopped_event =
-        expected_query_params
-        |> Map.put(:event, Tracker.stopped().value)
-        |> URI.encode_query()
-
-      # the second request is sent with stop event on process shutdown
-      assert_called_exactly(HTTPoison.get("#{tracker_url}?#{qp_with_stopped_event}", :_, :_), 1)
-    end
-  end
-
-  test "ensure HTTPTracker fail when peers payload is invalid", %{
-    tracker_url: tracker_url,
-    info_hash: info_hash
-  } do
-    {tracker_resp, _expected_peers} = http_tracker_announce_response()
-
-    with_mock HTTPoison,
-      get: fn _tracker_url, _headers, _opts ->
-        # corrupt the payload peers format in order to force parse to fail
-        invalid_tracker_resp =
-          Map.update!(tracker_resp, "peers", fn valid_peers ->
-            valid_peers <> <<:rand.uniform(255)::8>>
-          end)
-
-        {:ok, mock_response} = Serializer.encode(invalid_tracker_resp)
-        {:ok, %HTTPoison.Response{status_code: 200, body: mock_response}}
-      end do
-      tracker_params = %{
-        tracker_url: tracker_url,
-        info_hash: info_hash,
-        compact: 1,
-        num_want: nil
-      }
-
-      http_tracker_pid = start_supervised!({HTTPTracker, tracker_params: tracker_params})
-      tracker_info = HTTPTracker.get_tracker_info(http_tracker_pid)
-
-      assert tracker_info.error == "Invalid tracker response body."
-      assert tracker_info.tracker_data == nil
-      assert TrackerStorage.get(tracker_url) == :error
-      assert Registry.count(HiveTorrent.TrackerRegistry) == 1
-    end
-  end
-
-  test "ensure HTTPTracker sends complete event on download completed", %{
-    tracker_url: tracker_url,
-    info_hash: info_hash,
-    stats: stats
-  } do
-    {tracker_resp, _expected_peers} = http_tracker_announce_response()
-
-    # fully completed the download of the file pieces
-    Enum.each(stats.pieces, fn {piece_idx, _} ->
-      StatsStorage.downloaded(info_hash, piece_idx)
-    end)
-
-    test_pid = self()
-
-    with_mock HTTPoison,
-      get: fn tracker_url, _headers, _opts ->
-        [url, query_params] = String.split(tracker_url, "?")
-        query_params_decoded = URI.decode_query(query_params)
-
-        send(test_pid, {url, query_params_decoded})
-
-        {:ok, mock_response} =
-          Serializer.encode(%{tracker_resp | "min interval" => 1, "interval" => 1})
-
-        {:ok, %HTTPoison.Response{status_code: 200, body: mock_response}}
-      end do
-      tracker_params = %{
-        tracker_url: tracker_url,
-        info_hash: info_hash,
-        compact: 1,
-        num_want: nil
-      }
-
-      http_tracker_pid =
-        start_supervised!({HTTPTracker, tracker_params: tracker_params})
-
-      tracker_info = HTTPTracker.get_tracker_info(http_tracker_pid)
-
-      {:ok, updated_stats} = StatsStorage.get(info_hash)
-
-      expected_query_params = %{
-        "info_hash" => info_hash,
-        "peer_id" => updated_stats.peer_id,
-        "port" => Integer.to_string(updated_stats.port),
-        "uploaded" => Integer.to_string(updated_stats.uploaded),
-        "downloaded" => Integer.to_string(updated_stats.downloaded),
-        "left" => Integer.to_string(updated_stats.left),
-        "compact" => "1",
-        "key" => Integer.to_string(tracker_info.key)
-      }
-
-      qp_with_started_event =
-        Map.put(expected_query_params, "event", Tracker.started().value)
-
-      assert_receive {^tracker_url, ^qp_with_started_event}, 2_000
-
-      qp_with_completed_event =
-        Map.put(expected_query_params, "event", Tracker.completed().value)
-
-      assert_receive {^tracker_url, ^qp_with_completed_event}, 2_000
-
-      qp_with_none_event =
-        Map.put(expected_query_params, "event", Tracker.none().value)
-
-      assert_receive {^tracker_url, ^qp_with_none_event}, 2_000
-    end
-  end
-
-  test "ensure HTTPTracker fetch fails on not 200 status code", %{
-    tracker_url: tracker_url,
-    info_hash: info_hash
-  } do
-    with_mock HTTPoison,
-      get: fn _tracker_url, _headers, _opts ->
-        {:ok, %HTTPoison.Response{status_code: 400, body: "Invalid payload received."}}
-      end do
-      tracker_params = %{
-        tracker_url: tracker_url,
-        info_hash: info_hash,
-        compact: 1,
-        num_want: nil
-      }
-
-      http_tracker_pid = start_supervised!({HTTPTracker, tracker_params: tracker_params})
-
-      tracker_info = HTTPTracker.get_tracker_info(http_tracker_pid)
-      assert tracker_info.tracker_params == tracker_params
-
-      assert tracker_info.error ==
-               "Received status code 400 from tracker #{tracker_url}. Response: \"Invalid payload received.\""
-
-      assert tracker_info.tracker_data == nil
-      assert TrackerStorage.get(tracker_url) == :error
-      assert Registry.count(HiveTorrent.TrackerRegistry) == 1
-    end
-  end
-
-  test "ensure HTTPTracker fetch fails on network errors", %{
-    tracker_url: tracker_url,
-    info_hash: info_hash
-  } do
-    with_mock HTTPoison,
-      get: fn _tracker_url, _headers, _opts ->
-        {:error, %HTTPoison.Error{id: nil, reason: :timeout}}
-      end do
-      tracker_params = %{
-        tracker_url: tracker_url,
-        info_hash: info_hash,
-        compact: 1,
-        num_want: nil
-      }
-
-      http_tracker_pid = start_supervised!({HTTPTracker, tracker_params: tracker_params})
-
-      tracker_info = HTTPTracker.get_tracker_info(http_tracker_pid)
-      assert tracker_info.tracker_params == tracker_params
-
-      assert tracker_info.error ==
-               "Error timeout encountered during communication with tracker #{tracker_url} with info hash #{inspect(info_hash)}."
-
-      assert tracker_info.tracker_data == nil
-      assert TrackerStorage.get(tracker_url) == :error
-      assert Registry.count(HiveTorrent.TrackerRegistry) == 1
-    end
-  end
-
-  test "ensure HTTPTracker fails on the invalid payload response", %{
-    tracker_url: tracker_url,
-    info_hash: info_hash
-  } do
-    with_mock HTTPoison,
-      get: fn _tracker_url, _headers, _opts ->
-        {:ok, %HTTPoison.Response{status_code: 200, body: "<invalid_payload>"}}
-      end do
-      tracker_params = %{
-        tracker_url: tracker_url,
-        info_hash: info_hash,
-        compact: 1,
-        num_want: nil
-      }
-
-      http_tracker_pid = start_supervised!({HTTPTracker, tracker_params: tracker_params})
-
-      tracker_info = HTTPTracker.get_tracker_info(http_tracker_pid)
-      assert tracker_info.tracker_params == tracker_params
-
-      assert tracker_info.error ==
-               "Failed to parse tracker response: Unexpected token '<invalid_payload>' while parsing."
-
-      assert tracker_info.tracker_data == nil
-      assert TrackerStorage.get(tracker_url) == :error
-      assert Registry.count(HiveTorrent.TrackerRegistry) == 1
-    end
-  end
-
-  test "ensure HTTPTracker fails on the missing peers data", %{
-    tracker_url: tracker_url,
-    info_hash: info_hash
-  } do
-    with_mock HTTPoison,
-      get: fn _tracker_url, _headers, _opts ->
-        {:ok, mock_response} =
-          http_tracker_announce_response()
-          |> elem(0)
-          |> Map.delete("peers")
-          |> Serializer.encode()
-
-        {:ok, %HTTPoison.Response{status_code: 200, body: mock_response}}
-      end do
-      tracker_params = %{
-        tracker_url: tracker_url,
-        info_hash: info_hash,
-        compact: 1,
-        num_want: nil
-      }
-
-      http_tracker_pid = start_supervised!({HTTPTracker, tracker_params: tracker_params})
-
-      tracker_info = HTTPTracker.get_tracker_info(http_tracker_pid)
-      assert tracker_info.tracker_params == tracker_params
-      assert tracker_info.error == "Invalid tracker response body."
-      assert tracker_info.tracker_data == nil
-      assert TrackerStorage.get(tracker_url) == :error
-      assert Registry.count(HiveTorrent.TrackerRegistry) == 1
-    end
-  end
-
-  test "ensure HTTPTracker fails on the missing interval value", %{
-    tracker_url: tracker_url,
-    info_hash: info_hash
-  } do
-    with_mock HTTPoison,
-      get: fn _tracker_url, _headers, _opts ->
-        {:ok, mock_response} =
-          http_tracker_announce_response()
-          |> elem(0)
-          |> Map.delete("interval")
-          |> Serializer.encode()
-
-        {:ok, %HTTPoison.Response{status_code: 200, body: mock_response}}
-      end do
-      tracker_params = %{
-        tracker_url: tracker_url,
-        info_hash: info_hash,
-        compact: 1,
-        num_want: nil
-      }
-
-      http_tracker_pid = start_supervised!({HTTPTracker, tracker_params: tracker_params})
-
-      tracker_info = HTTPTracker.get_tracker_info(http_tracker_pid)
-      assert tracker_info.tracker_params == tracker_params
-      assert tracker_info.error == "Invalid tracker response body."
-      assert tracker_info.tracker_data == nil
-      assert TrackerStorage.get(tracker_url) == :error
-      assert Registry.count(HiveTorrent.TrackerRegistry) == 1
-    end
-  end
-
-  test "ensure HTTPTracker fails on the negative interval value", %{
-    tracker_url: tracker_url,
-    info_hash: info_hash
-  } do
-    with_mock HTTPoison,
-      get: fn _tracker_url, _headers, _opts ->
-        {:ok, mock_response} =
-          http_tracker_announce_response()
-          |> elem(0)
-          |> Map.put("interval", :rand.uniform(100) * -1)
-          |> Serializer.encode()
-
-        {:ok, %HTTPoison.Response{status_code: 200, body: mock_response}}
-      end do
-      tracker_params = %{
-        tracker_url: tracker_url,
-        info_hash: info_hash,
-        compact: 1,
-        num_want: nil
-      }
-
-      http_tracker_pid = start_supervised!({HTTPTracker, tracker_params: tracker_params})
-
-      tracker_info = HTTPTracker.get_tracker_info(http_tracker_pid)
-      assert tracker_info.tracker_params == tracker_params
-      assert tracker_info.error == "Invalid tracker response body."
-      assert tracker_info.tracker_data == nil
-      assert TrackerStorage.get(tracker_url) == :error
-      assert Registry.count(HiveTorrent.TrackerRegistry) == 1
-    end
-  end
-
-  test "ensure HTTPTracker negative min interval value is converted to nil", %{
-    tracker_url: tracker_url,
-    info_hash: info_hash
-  } do
-    {tracker_resp, expected_peers} = http_tracker_announce_response()
-
-    expected_tracker_data = %Tracker{
       info_hash: info_hash,
+      stats: stats
+    } do
+      {tracker_resp, _expected_peers} = http_tracker_announce_response()
+
+      with_mock HTTPoison,
+        get: fn _tracker_url, _headers, _opts ->
+          # corrupt the payload peers format in order to force parse to fail
+          invalid_tracker_resp =
+            Map.update!(tracker_resp, "peers", fn valid_peers ->
+              valid_peers <> <<:rand.uniform(255)::8>>
+            end)
+
+          {:ok, mock_response} = Serializer.encode(invalid_tracker_resp)
+          {:ok, %HTTPoison.Response{status_code: 200, body: mock_response}}
+        end do
+        compact = 1
+        key = :rand.uniform(1_000)
+        ip = create_ip() |> ip_to_string()
+        num_want = -1..1_000 |> Enum.random()
+        event = random_announce_event()
+
+        response =
+          HTTPTracker.send_announce_request(%{
+            tracker_url: tracker_url,
+            info_hash: info_hash,
+            compact: compact,
+            event: event,
+            peer_id: stats.peer_id,
+            ip: ip,
+            key: key,
+            port: stats.port,
+            uploaded: stats.uploaded,
+            downloaded: stats.downloaded,
+            left: stats.left,
+            num_want: num_want
+          })
+
+        assert response == {:error, "Failed to parse IPv4 peers."}
+      end
+    end
+
+    test "ensure HTTPTracker announce returns error on not 200 status code", %{
       tracker_url: tracker_url,
-      complete: Map.fetch!(tracker_resp, "complete"),
-      downloaded: Map.fetch!(tracker_resp, "downloaded"),
-      incomplete: Map.fetch!(tracker_resp, "incomplete"),
-      interval: Map.fetch!(tracker_resp, "interval"),
-      min_interval: nil,
-      peers: expected_peers,
-      updated_at: @mock_updated_date
-    }
+      info_hash: info_hash,
+      stats: stats
+    } do
+      with_mock HTTPoison,
+        get: fn _tracker_url, _headers, _opts ->
+          {:ok, %HTTPoison.Response{status_code: 400, body: "Invalid payload received."}}
+        end do
+        compact = 1
+        key = :rand.uniform(1_000)
+        ip = create_ip() |> ip_to_string()
+        num_want = -1..1_000 |> Enum.random()
+        event = random_announce_event()
 
-    with_mock HTTPoison,
-      get: fn _tracker_url, _headers, _opts ->
-        {:ok, mock_response} =
-          tracker_resp
-          |> Map.put("min interval", :rand.uniform(100) * -1)
-          |> Serializer.encode()
+        response =
+          HTTPTracker.send_announce_request(%{
+            tracker_url: tracker_url,
+            info_hash: info_hash,
+            compact: compact,
+            event: event,
+            peer_id: stats.peer_id,
+            ip: ip,
+            key: key,
+            port: stats.port,
+            uploaded: stats.uploaded,
+            downloaded: stats.downloaded,
+            left: stats.left,
+            num_want: num_want
+          })
 
-        {:ok, %HTTPoison.Response{status_code: 200, body: mock_response}}
-      end do
-      tracker_params = %{
-        tracker_url: tracker_url,
+        assert response ==
+                 {:error,
+                  "Received status code 400 from tracker #{tracker_url}. Response: \"Invalid payload received.\"."}
+      end
+    end
+
+    test "ensure HTTPTracker announce returns error on network errors", %{
+      tracker_url: tracker_url,
+      info_hash: info_hash,
+      stats: stats
+    } do
+      with_mock HTTPoison,
+        get: fn _tracker_url, _headers, _opts ->
+          {:error, %HTTPoison.Error{id: nil, reason: :timeout}}
+        end do
+        compact = 1
+        key = :rand.uniform(1_000)
+        ip = create_ip() |> ip_to_string()
+        num_want = -1..1_000 |> Enum.random()
+        event = random_announce_event()
+
+        response =
+          HTTPTracker.send_announce_request(%{
+            tracker_url: tracker_url,
+            info_hash: info_hash,
+            compact: compact,
+            event: event,
+            peer_id: stats.peer_id,
+            ip: ip,
+            key: key,
+            port: stats.port,
+            uploaded: stats.uploaded,
+            downloaded: stats.downloaded,
+            left: stats.left,
+            num_want: num_want
+          })
+
+        assert response ==
+                 {:error,
+                  "Error 'timeout' encountered during announce request with tracker #{tracker_url} with info hash #{inspect(info_hash)}."}
+      end
+    end
+
+    test "ensure HTTPTracker announce returns error on the invalid payload response", %{
+      tracker_url: tracker_url,
+      info_hash: info_hash,
+      stats: stats
+    } do
+      with_mock HTTPoison,
+        get: fn _tracker_url, _headers, _opts ->
+          {:ok, %HTTPoison.Response{status_code: 200, body: "<invalid_payload>"}}
+        end do
+        compact = 1
+        key = :rand.uniform(1_000)
+        ip = create_ip() |> ip_to_string()
+        num_want = -1..1_000 |> Enum.random()
+        event = random_announce_event()
+
+        response =
+          HTTPTracker.send_announce_request(%{
+            tracker_url: tracker_url,
+            info_hash: info_hash,
+            compact: compact,
+            event: event,
+            peer_id: stats.peer_id,
+            ip: ip,
+            key: key,
+            port: stats.port,
+            uploaded: stats.uploaded,
+            downloaded: stats.downloaded,
+            left: stats.left,
+            num_want: num_want
+          })
+
+        assert response ==
+                 {:error,
+                  "Failed to parse bencoded data: Unexpected token '<invalid_payload>' while parsing."}
+      end
+    end
+
+    test "ensure HTTPTracker announce returns error on the missing peers data", %{
+      tracker_url: tracker_url,
+      info_hash: info_hash,
+      stats: stats
+    } do
+      with_mock HTTPoison,
+        get: fn _tracker_url, _headers, _opts ->
+          {:ok, mock_response} =
+            http_tracker_announce_response()
+            |> elem(0)
+            |> Map.delete("peers")
+            |> Serializer.encode()
+
+          {:ok, %HTTPoison.Response{status_code: 200, body: mock_response}}
+        end do
+        compact = 1
+        key = :rand.uniform(1_000)
+        ip = create_ip() |> ip_to_string()
+        num_want = -1..1_000 |> Enum.random()
+        event = random_announce_event()
+
+        response =
+          HTTPTracker.send_announce_request(%{
+            tracker_url: tracker_url,
+            info_hash: info_hash,
+            compact: compact,
+            event: event,
+            peer_id: stats.peer_id,
+            ip: ip,
+            key: key,
+            port: stats.port,
+            uploaded: stats.uploaded,
+            downloaded: stats.downloaded,
+            left: stats.left,
+            num_want: num_want
+          })
+
+        assert response ==
+                 {:error, "Unknown failure reason in the tracker response."}
+      end
+    end
+
+    test "ensure HTTPTracker announce returns error on the missing interval value", %{
+      tracker_url: tracker_url,
+      info_hash: info_hash,
+      stats: stats
+    } do
+      with_mock HTTPoison,
+        get: fn _tracker_url, _headers, _opts ->
+          {:ok, mock_response} =
+            http_tracker_announce_response()
+            |> elem(0)
+            |> Map.delete("interval")
+            |> Serializer.encode()
+
+          {:ok, %HTTPoison.Response{status_code: 200, body: mock_response}}
+        end do
+        compact = 1
+        key = :rand.uniform(1_000)
+        ip = create_ip() |> ip_to_string()
+        num_want = -1..1_000 |> Enum.random()
+        event = random_announce_event()
+
+        response =
+          HTTPTracker.send_announce_request(%{
+            tracker_url: tracker_url,
+            info_hash: info_hash,
+            compact: compact,
+            event: event,
+            peer_id: stats.peer_id,
+            ip: ip,
+            key: key,
+            port: stats.port,
+            uploaded: stats.uploaded,
+            downloaded: stats.downloaded,
+            left: stats.left,
+            num_want: num_want
+          })
+
+        assert response ==
+                 {:error, "Interval value missing in response."}
+      end
+    end
+
+    test "ensure HTTPTracker announce returns error on the negative interval value", %{
+      tracker_url: tracker_url,
+      info_hash: info_hash,
+      stats: stats
+    } do
+      interval = :rand.uniform(100) * -1
+
+      with_mock HTTPoison,
+        get: fn _tracker_url, _headers, _opts ->
+          {:ok, mock_response} =
+            http_tracker_announce_response()
+            |> elem(0)
+            |> Map.put("interval", interval)
+            |> Serializer.encode()
+
+          {:ok, %HTTPoison.Response{status_code: 200, body: mock_response}}
+        end do
+        compact = 1
+        key = :rand.uniform(1_000)
+        ip = create_ip() |> ip_to_string()
+        num_want = -1..1_000 |> Enum.random()
+        event = random_announce_event()
+
+        response =
+          HTTPTracker.send_announce_request(%{
+            tracker_url: tracker_url,
+            info_hash: info_hash,
+            compact: compact,
+            event: event,
+            peer_id: stats.peer_id,
+            ip: ip,
+            key: key,
+            port: stats.port,
+            uploaded: stats.uploaded,
+            downloaded: stats.downloaded,
+            left: stats.left,
+            num_want: num_want
+          })
+
+        assert response ==
+                 {:error, "Negative interval received with value #{interval}."}
+      end
+    end
+
+    test "ensure HTTPTracker announce negative min interval value is converted to nil", %{
+      tracker_url: tracker_url,
+      info_hash: info_hash,
+      stats: stats
+    } do
+      {tracker_resp, expected_peers} = http_tracker_announce_response()
+
+      expected_tracker_data = %Tracker{
         info_hash: info_hash,
-        compact: 1,
-        num_want: nil
+        tracker_url: tracker_url,
+        complete: Map.fetch!(tracker_resp, "complete"),
+        downloaded: Map.fetch!(tracker_resp, "downloaded"),
+        incomplete: Map.fetch!(tracker_resp, "incomplete"),
+        interval: Map.fetch!(tracker_resp, "interval"),
+        min_interval: nil,
+        peers: expected_peers,
+        updated_at: @mock_updated_date
       }
 
-      http_tracker_pid = start_supervised!({HTTPTracker, tracker_params: tracker_params})
+      with_mock HTTPoison,
+        get: fn _tracker_url, _headers, _opts ->
+          {:ok, mock_response} =
+            tracker_resp
+            |> Map.put("min interval", :rand.uniform(100) * -1)
+            |> Serializer.encode()
 
-      tracker_info = HTTPTracker.get_tracker_info(http_tracker_pid)
-      assert tracker_info.tracker_params == tracker_params
-      assert tracker_info.error == nil
-      assert tracker_info.tracker_data == expected_tracker_data
-      assert TrackerStorage.get(tracker_url) == {:ok, expected_tracker_data}
-      assert Registry.count(HiveTorrent.TrackerRegistry) == 1
+          {:ok, %HTTPoison.Response{status_code: 200, body: mock_response}}
+        end do
+        compact = 1
+        key = :rand.uniform(1_000)
+        ip = create_ip() |> ip_to_string()
+        num_want = -1..1_000 |> Enum.random()
+        event = random_announce_event()
+
+        announce_response =
+          HTTPTracker.send_announce_request(%{
+            tracker_url: tracker_url,
+            info_hash: info_hash,
+            compact: compact,
+            event: event,
+            peer_id: stats.peer_id,
+            ip: ip,
+            key: key,
+            port: stats.port,
+            uploaded: stats.uploaded,
+            downloaded: stats.downloaded,
+            left: stats.left,
+            num_want: num_want
+          })
+
+        assert announce_response == {:ok, expected_tracker_data}
+      end
+    end
+
+    test "ensure HTTPTracker announce returns error reason response", %{
+      tracker_url: tracker_url,
+      info_hash: info_hash,
+      stats: stats
+    } do
+      failure_reason = Faker.Lorem.sentence()
+
+      with_mock HTTPoison,
+        get: fn _tracker_url, _headers, _opts ->
+          {:ok, tracker_resp} = Serializer.encode(%{"failure reason" => failure_reason})
+          {:ok, %HTTPoison.Response{status_code: 200, body: tracker_resp}}
+        end do
+        compact = 1
+        key = :rand.uniform(1_000)
+        ip = create_ip() |> ip_to_string()
+        num_want = -1..1_000 |> Enum.random()
+        event = random_announce_event()
+
+        response =
+          HTTPTracker.send_announce_request(%{
+            tracker_url: tracker_url,
+            info_hash: info_hash,
+            compact: compact,
+            event: event,
+            peer_id: stats.peer_id,
+            ip: ip,
+            key: key,
+            port: stats.port,
+            uploaded: stats.uploaded,
+            downloaded: stats.downloaded,
+            left: stats.left,
+            num_want: num_want
+          })
+
+        assert response == {:error, failure_reason}
+      end
+    end
+  end
+
+  describe "Scrape message" do
+    test "ensure HTTPTracker scrape successfully fetch the tracker data", %{
+      tracker_url: tracker_url,
+      info_hash: info_hash
+    } do
+      {tracker_resp, _expected_files} = http_tracker_scrape_response(info_hash)
+
+      torrent_scrape_data = tracker_resp |> Map.fetch!("files") |> Map.fetch!(info_hash)
+
+      expected_scrape_data = %ScrapeResponse{
+        info_hash: info_hash,
+        tracker_url: tracker_url,
+        complete: Map.fetch!(torrent_scrape_data, "complete"),
+        downloaded: Map.fetch!(torrent_scrape_data, "downloaded"),
+        incomplete: Map.fetch!(torrent_scrape_data, "incomplete"),
+        interval: Map.fetch!(tracker_resp, "interval"),
+        min_interval: Map.fetch!(tracker_resp, "min interval"),
+        updated_at: @mock_updated_date
+      }
+
+      with_mock HTTPoison,
+        get: fn _tracker_url, _headers, _opts ->
+          {:ok, mock_response} = Serializer.encode(tracker_resp)
+          {:ok, %HTTPoison.Response{status_code: 200, body: mock_response}}
+        end do
+        {:ok, scrape_data} =
+          HTTPTracker.send_scrape_request(%{
+            tracker_url: tracker_url,
+            info_hashes: [info_hash]
+          })
+
+        torrent_scrape_data = Map.fetch!(scrape_data, info_hash)
+        assert torrent_scrape_data == expected_scrape_data
+
+        expected_query_params = [
+          {
+            :info_hash,
+            info_hash
+          }
+        ]
+
+        {:ok, scrape_url} = HTTPTracker.create_scrape_url(tracker_url)
+        qp = URI.encode_query(expected_query_params)
+        assert_called_exactly(HTTPoison.get("#{scrape_url}?#{qp}", :_, :_), 1)
+      end
+    end
+
+    test "ensure HTTPTracker scrape returns error when files payload is invalid", %{
+      tracker_url: tracker_url,
+      info_hash: info_hash
+    } do
+      {tracker_resp, _expected_files} = http_tracker_scrape_response(info_hash)
+
+      with_mock HTTPoison,
+        get: fn _tracker_url, _headers, _opts ->
+          # corrupt the payload files format in order to force parse to fail
+          invalid_tracker_resp = Map.delete(tracker_resp, "files")
+
+          {:ok, mock_response} = Serializer.encode(invalid_tracker_resp)
+          {:ok, %HTTPoison.Response{status_code: 200, body: mock_response}}
+        end do
+        response =
+          HTTPTracker.send_scrape_request(%{
+            tracker_url: tracker_url,
+            info_hashes: [info_hash]
+          })
+
+        assert response == {:error, "Unknown failure reason in the tracker response."}
+      end
+    end
+
+    test "ensure HTTPTracker scrape returns error on not 200 status code", %{
+      tracker_url: tracker_url,
+      info_hash: info_hash
+    } do
+      with_mock HTTPoison,
+        get: fn _tracker_url, _headers, _opts ->
+          {:ok, %HTTPoison.Response{status_code: 400, body: "Invalid payload received."}}
+        end do
+        response =
+          HTTPTracker.send_scrape_request(%{
+            tracker_url: tracker_url,
+            info_hashes: [info_hash]
+          })
+
+        assert response ==
+                 {:error,
+                  "Received status code 400 from tracker #{tracker_url}. Response: \"Invalid payload received.\"."}
+      end
+    end
+
+    test "ensure HTTPTracker scrape returns error on network errors", %{
+      tracker_url: tracker_url,
+      info_hash: info_hash
+    } do
+      with_mock HTTPoison,
+        get: fn _tracker_url, _headers, _opts ->
+          {:error, %HTTPoison.Error{id: nil, reason: :timeout}}
+        end do
+        info_hashes = [info_hash]
+
+        response =
+          HTTPTracker.send_scrape_request(%{
+            tracker_url: tracker_url,
+            info_hashes: info_hashes
+          })
+
+        assert response ==
+                 {:error,
+                  "Error timeout encountered during scrape request with tracker #{tracker_url} with info hash #{inspect(info_hashes)}."}
+      end
+    end
+
+    test "ensure HTTPTracker scrape returns error on the invalid payload response", %{
+      tracker_url: tracker_url,
+      info_hash: info_hash
+    } do
+      with_mock HTTPoison,
+        get: fn _tracker_url, _headers, _opts ->
+          {:ok, %HTTPoison.Response{status_code: 200, body: "<invalid_payload>"}}
+        end do
+        response =
+          HTTPTracker.send_scrape_request(%{
+            tracker_url: tracker_url,
+            info_hashes: [info_hash]
+          })
+
+        assert response ==
+                 {:error,
+                  "Failed to parse bencoded data: Unexpected token '<invalid_payload>' while parsing."}
+      end
+    end
+
+    test "ensure HTTPTracker scrape returns default values on the missing info_data data", %{
+      tracker_url: tracker_url,
+      info_hash: info_hash
+    } do
+      {tracker_resp, _expected_files} = http_tracker_scrape_response(create_info_hash())
+
+      expected_scrape_data = %ScrapeResponse{
+        info_hash: info_hash,
+        tracker_url: tracker_url,
+        complete: 0,
+        downloaded: 0,
+        incomplete: 0,
+        interval: Map.fetch!(tracker_resp, "interval"),
+        min_interval: Map.fetch!(tracker_resp, "min interval"),
+        updated_at: @mock_updated_date
+      }
+
+      with_mock HTTPoison,
+        get: fn _tracker_url, _headers, _opts ->
+          {:ok, mock_response} = Serializer.encode(tracker_resp)
+
+          {:ok, %HTTPoison.Response{status_code: 200, body: mock_response}}
+        end do
+        {:ok, scrape_data} =
+          HTTPTracker.send_scrape_request(%{
+            tracker_url: tracker_url,
+            info_hashes: [info_hash]
+          })
+
+        torrent_scrape_data = Map.fetch!(scrape_data, info_hash)
+
+        assert torrent_scrape_data == expected_scrape_data
+      end
+    end
+
+    test "ensure HTTPTracker scrape returns error on the missing interval value", %{
+      tracker_url: tracker_url,
+      info_hash: info_hash
+    } do
+      with_mock HTTPoison,
+        get: fn _tracker_url, _headers, _opts ->
+          {:ok, mock_response} =
+            http_tracker_scrape_response(info_hash)
+            |> elem(0)
+            |> Map.delete("interval")
+            |> Serializer.encode()
+
+          {:ok, %HTTPoison.Response{status_code: 200, body: mock_response}}
+        end do
+        response =
+          HTTPTracker.send_scrape_request(%{
+            tracker_url: tracker_url,
+            info_hashes: [info_hash]
+          })
+
+        assert response ==
+                 {:error, "Interval value missing in response."}
+      end
+    end
+
+    test "ensure HTTPTracker scrape returns error on the negative interval value", %{
+      tracker_url: tracker_url,
+      info_hash: info_hash
+    } do
+      interval = :rand.uniform(100) * -1
+
+      with_mock HTTPoison,
+        get: fn _tracker_url, _headers, _opts ->
+          {:ok, mock_response} =
+            http_tracker_scrape_response(info_hash)
+            |> elem(0)
+            |> Map.put("interval", interval)
+            |> Serializer.encode()
+
+          {:ok, %HTTPoison.Response{status_code: 200, body: mock_response}}
+        end do
+        response =
+          HTTPTracker.send_scrape_request(%{
+            tracker_url: tracker_url,
+            info_hashes: [info_hash]
+          })
+
+        assert response ==
+                 {:error, "Negative interval received with value #{interval}."}
+      end
+    end
+
+    test "ensure HTTPTracker scrape negative min interval value is converted to nil", %{
+      tracker_url: tracker_url,
+      info_hash: info_hash
+    } do
+      {tracker_resp, _expected_files} = http_tracker_scrape_response(info_hash)
+      torrent_scrape_data = tracker_resp |> Map.fetch!("files") |> Map.fetch!(info_hash)
+
+      expected_scrape_data = %ScrapeResponse{
+        info_hash: info_hash,
+        tracker_url: tracker_url,
+        complete: Map.fetch!(torrent_scrape_data, "complete"),
+        downloaded: Map.fetch!(torrent_scrape_data, "downloaded"),
+        incomplete: Map.fetch!(torrent_scrape_data, "incomplete"),
+        interval: Map.fetch!(tracker_resp, "interval"),
+        min_interval: nil,
+        updated_at: @mock_updated_date
+      }
+
+      with_mock HTTPoison,
+        get: fn _tracker_url, _headers, _opts ->
+          {:ok, mock_response} =
+            tracker_resp
+            |> Map.put("min interval", :rand.uniform(100) * -1)
+            |> Serializer.encode()
+
+          {:ok, %HTTPoison.Response{status_code: 200, body: mock_response}}
+        end do
+        {:ok, scrape_response} =
+          HTTPTracker.send_scrape_request(%{
+            tracker_url: tracker_url,
+            info_hashes: [info_hash]
+          })
+
+        torrent_scrape_data = Map.fetch!(scrape_response, info_hash)
+        assert torrent_scrape_data == expected_scrape_data
+      end
+    end
+
+    test "ensure HTTPTracker scrape returns error reason response", %{
+      tracker_url: tracker_url,
+      info_hash: info_hash
+    } do
+      failure_reason = Faker.Lorem.sentence()
+
+      with_mock HTTPoison,
+        get: fn _tracker_url, _headers, _opts ->
+          {:ok, tracker_resp} = Serializer.encode(%{"failure reason" => failure_reason})
+          {:ok, %HTTPoison.Response{status_code: 200, body: tracker_resp}}
+        end do
+        response =
+          HTTPTracker.send_scrape_request(%{
+            tracker_url: tracker_url,
+            info_hashes: [info_hash]
+          })
+
+        assert response == {:error, failure_reason}
+      end
+    end
+  end
+
+  describe "Scrape URL convert" do
+    test "Supported conversion announce URL to scrape URL" do
+      url = Faker.Internet.url()
+
+      assert HTTPTracker.create_scrape_url("#{url}/announce") == {:ok, "#{url}/scrape"}
+      assert HTTPTracker.create_scrape_url("#{url}/announce.php") == {:ok, "#{url}/scrape.php"}
+      assert HTTPTracker.create_scrape_url("#{url}/x/announce") == {:ok, "#{url}/x/scrape"}
+
+      url_query_params = Faker.Lorem.sentence()
+
+      assert HTTPTracker.create_scrape_url("#{url}/announce?#{url_query_params}") ==
+               {:ok, "#{url}/scrape?#{url_query_params}"}
+    end
+
+    test "Not suported conversion announce URL to scrape URL" do
+      url = Faker.Internet.url()
+
+      assert HTTPTracker.create_scrape_url("#{url}/a") ==
+               {:error, "Scrape is not supported for tracker #{url}/a."}
+
+      url_slug = Faker.Internet.slug()
+
+      assert HTTPTracker.create_scrape_url("#{url}/#{url_slug}announce") ==
+               {:error, "Scrape is not supported for tracker #{url}/#{url_slug}announce."}
+
+      url_query_params = Faker.Lorem.word() <> "/" <> Faker.Lorem.word()
+
+      assert HTTPTracker.create_scrape_url("#{url}/announce?#{url_query_params}") ==
+               {:error,
+                "Scrape is not supported for tracker #{url}/announce?#{url_query_params}."}
     end
   end
 end

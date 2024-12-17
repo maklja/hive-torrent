@@ -35,6 +35,41 @@ defmodule HiveTorrent.TrackerMocks do
     {tracker_response_mock, expected_peers}
   end
 
+  def http_tracker_scrape_response(info_hash) do
+    info_hashes_num = :rand.uniform(10)
+
+    init_files = %{
+      info_hash => %{
+        "complete" => Faker.random_between(0, 100),
+        "downloaded" => Faker.random_between(0, 9999),
+        "incomplete" => Faker.random_between(0, 100)
+      }
+    }
+
+    expected_files =
+      1..info_hashes_num
+      |> Enum.reduce(
+        init_files,
+        fn _i, files ->
+          info_hash = create_info_hash()
+
+          Map.put(files, info_hash, %{
+            "complete" => Faker.random_between(0, 100),
+            "downloaded" => Faker.random_between(0, 9999),
+            "incomplete" => Faker.random_between(0, 100)
+          })
+        end
+      )
+
+    tracker_response_mock = %{
+      "files" => expected_files,
+      "interval" => Faker.random_between(0, 2_000),
+      "min interval" => Faker.random_between(0, 1_000)
+    }
+
+    {tracker_response_mock, expected_files}
+  end
+
   def create_peers_response() do
     ip_addresses =
       1..:rand.uniform(10)
@@ -125,7 +160,7 @@ defmodule HiveTorrent.TrackerMocks do
     Faker.random_between(1024, 65535)
   end
 
-  defp ip_to_string(ip),
+  def ip_to_string(ip),
     do:
       ip
       |> Tuple.to_list()

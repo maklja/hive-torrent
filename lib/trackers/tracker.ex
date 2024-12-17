@@ -1,4 +1,4 @@
-defmodule HiveTorrent.Tracker do
+defmodule HiveTorrent.ScrapeResponse do
   @type t :: %__MODULE__{
           info_hash: binary(),
           tracker_url: String.t(),
@@ -7,7 +7,34 @@ defmodule HiveTorrent.Tracker do
           incomplete: pos_integer(),
           interval: pos_integer(),
           min_interval: pos_integer() | nil,
-          peers: %{String.t() => [pos_integer()]}
+          updated_at: DateTime.t()
+        }
+
+  defstruct [
+    :info_hash,
+    :tracker_url,
+    :complete,
+    :downloaded,
+    :incomplete,
+    :interval,
+    :min_interval,
+    :updated_at
+  ]
+end
+
+defmodule HiveTorrent.Tracker do
+  alias HiveTorrent.ScrapeResponse
+
+  @type t :: %__MODULE__{
+          info_hash: binary(),
+          tracker_url: String.t(),
+          complete: pos_integer(),
+          downloaded: pos_integer() | nil,
+          incomplete: pos_integer(),
+          interval: pos_integer(),
+          min_interval: pos_integer() | nil,
+          peers: %{String.t() => [pos_integer()]},
+          updated_at: DateTime.t()
         }
 
   defstruct [
@@ -116,5 +143,19 @@ defmodule HiveTorrent.Tracker do
       {:error, reason} ->
         {:error, "Failed to resolve hostname, reason #{reason} with tracker #{hostname}."}
     end
+  end
+
+  def scrape_response_to_torrent(%ScrapeResponse{} = scrape_response) do
+    %HiveTorrent.Tracker{
+      info_hash: scrape_response.info_hash,
+      tracker_url: scrape_response.tracker_url,
+      complete: scrape_response.complete,
+      downloaded: scrape_response.downloaded,
+      incomplete: scrape_response.incomplete,
+      interval: scrape_response.interval,
+      min_interval: scrape_response.min_interval,
+      peers: nil,
+      updated_at: scrape_response.updated_at
+    }
   end
 end

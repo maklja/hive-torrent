@@ -63,7 +63,7 @@ defmodule HiveTorrent.HTTPAnnounceServer do
 
   @impl true
   def init(tracker_params: tracker_params, timeout: timeout, auto_fetch: auto_fetch) do
-    Logger.info("Started tracker #{tracker_params.tracker_url}")
+    Logger.info("Started announce server #{tracker_params.tracker_url}")
 
     tracker_params = tracker_params |> Map.put_new(:compact, 1) |> Map.put_new(:num_want, nil)
 
@@ -89,7 +89,7 @@ defmodule HiveTorrent.HTTPAnnounceServer do
 
   @impl true
   def handle_continue(:announce, %{tracker_params: tracker_params} = state) do
-    Logger.info("Init tracker #{tracker_params.tracker_url}")
+    Logger.info("Init announce server #{tracker_params.tracker_url}")
 
     handle_info(:send_announce, state)
   end
@@ -145,7 +145,7 @@ defmodule HiveTorrent.HTTPAnnounceServer do
     case tracker_data_response do
       {:ok, tracker_data} ->
         Logger.debug(
-          "Received tracker(#{tracker_params.tracker_url}) data: #{inspect(tracker_data)}"
+          "Received announce server(#{tracker_params.tracker_url}) data: #{inspect(tracker_data)}"
         )
 
         if next_event === HTTPTracker.completed(),
@@ -183,7 +183,7 @@ defmodule HiveTorrent.HTTPAnnounceServer do
         timeout_id: timeout_id,
         timeout: timeout
       }) do
-    Logger.info("Terminating tracker #{tracker_params.tracker_url}")
+    Logger.info("Terminating announce server #{tracker_params.tracker_url}")
 
     cancel_scheduled_time(timeout_id)
 
@@ -210,7 +210,7 @@ defmodule HiveTorrent.HTTPAnnounceServer do
     case tracker_data_response do
       {:ok, tracker_data} ->
         Logger.debug(
-          "Received tracker(#{tracker_params.tracker_url}) data: #{inspect(tracker_data)}"
+          "Received announce tracker(#{tracker_params.tracker_url}) data: #{inspect(tracker_data)}"
         )
 
       {:error, reason} ->

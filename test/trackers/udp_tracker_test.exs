@@ -6,7 +6,7 @@ defmodule HiveTorrent.UDPTrackerTest do
 
   doctest HiveTorrent.UDPTracker
 
-  alias HiveTorrent.TrackerStorage
+  alias HiveTorrent.TorrentInfoStorage
   alias HiveTorrent.StatsStorage
   alias HiveTorrent.TrackerRegistry
   alias HiveTorrent.Tracker
@@ -30,14 +30,14 @@ defmodule HiveTorrent.UDPTrackerTest do
       stats: stats
     }
 
-    start_supervised!({TrackerStorage, nil})
+    start_supervised!({TorrentInfoStorage, nil})
     start_supervised!({Registry, keys: :duplicate, name: TrackerRegistry})
     start_supervised!({StatsStorage, [stats]})
 
     {:ok, params}
   end
 
-  test "ensure UDPTracker fetch the tracker data and store it in TrackerStorage", %{
+  test "ensure UDPTracker fetch the tracker data and store it in TorrentInfoStorage", %{
     tracker_url: tracker_url,
     info_hash: info_hash,
     stats: stats
@@ -90,7 +90,10 @@ defmodule HiveTorrent.UDPTrackerTest do
       assert tracker_info.tracker_params == tracker_params
       assert tracker_info.error == nil
       assert tracker_info.tracker_data == expected_tracker_data
-      assert TrackerStorage.get(tracker_url) == {:ok, expected_tracker_data}
+
+      assert TorrentInfoStorage.get_torrent(tracker_url, info_hash) ==
+               {:ok, expected_tracker_data}
+
       assert Registry.count(HiveTorrent.TrackerRegistry) == 1
 
       announce_with_started_event =
@@ -169,7 +172,7 @@ defmodule HiveTorrent.UDPTrackerTest do
       tracker_info = UDPTracker.get_tracker_info(udp_tracker_pid)
       assert tracker_info.error == "Failed to parse IPv4 peers."
       assert tracker_info.tracker_data == nil
-      assert TrackerStorage.get(tracker_url) == :error
+      assert TorrentInfoStorage.get_torrent(tracker_url, info_hash) == :error
       assert Registry.count(HiveTorrent.TrackerRegistry) == 1
     end
   end
@@ -213,7 +216,7 @@ defmodule HiveTorrent.UDPTrackerTest do
       tracker_info = UDPTracker.get_tracker_info(udp_tracker_pid)
       assert tracker_info.error == "Invalid message format for announce response."
       assert tracker_info.tracker_data == nil
-      assert TrackerStorage.get(tracker_url) == :error
+      assert TorrentInfoStorage.get_torrent(tracker_url, info_hash) == :error
       assert Registry.count(HiveTorrent.TrackerRegistry) == 1
     end
   end
@@ -367,7 +370,7 @@ defmodule HiveTorrent.UDPTrackerTest do
       tracker_info = UDPTracker.get_tracker_info(udp_tracker_pid)
       assert tracker_info.error == "Invalid message format for announce response."
       assert tracker_info.tracker_data == nil
-      assert TrackerStorage.get(tracker_url) == :error
+      assert TorrentInfoStorage.get_torrent(tracker_url, info_hash) == :error
       assert Registry.count(HiveTorrent.TrackerRegistry) == 1
     end
   end
@@ -411,7 +414,7 @@ defmodule HiveTorrent.UDPTrackerTest do
       tracker_info = UDPTracker.get_tracker_info(udp_tracker_pid)
       assert tracker_info.error == error_message_response
       assert tracker_info.tracker_data == nil
-      assert TrackerStorage.get(tracker_url) == :error
+      assert TorrentInfoStorage.get_torrent(tracker_url, info_hash) == :error
       assert Registry.count(HiveTorrent.TrackerRegistry) == 1
     end
   end

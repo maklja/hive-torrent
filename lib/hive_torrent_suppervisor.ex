@@ -13,7 +13,7 @@ defmodule HiveTorrent.Supervisor do
   def init(_init_args) do
     children = [
       {HiveTorrent.StatsStorage, []},
-      {HiveTorrent.TrackerStorage, nil},
+      {HiveTorrent.TorrentInfoStorage, nil},
       {Registry, keys: :duplicate, name: HiveTorrent.TrackerRegistry},
       {HiveTorrent.UDPTrackerSocket, port: 6888, message_callback: &message_received_callback/3},
       {HiveTorrent.TrackerSupervisor, nil}

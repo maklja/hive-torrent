@@ -10,6 +10,16 @@ defmodule HiveTorrent.ScrapeResponse do
           updated_at: DateTime.t()
         }
 
+        # %{
+        #   "files" => %{
+        #     <<139, 61, 186, 208, 8, 244, 234, 59, 33, 200, 48, 122, 110, 62, 229, 238,
+        #       8, 0, 242,
+        #       86>> => %{"complete" => 0, "downloaded" => 0, "incomplete" => 0}
+        #   },
+        #   "interval" => 1200,
+        #   "min interval" => 900
+        # }
+
   defstruct [
     :info_hash,
     :tracker_url,

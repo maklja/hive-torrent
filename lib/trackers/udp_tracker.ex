@@ -7,7 +7,7 @@ defmodule HiveTorrent.UDPTracker do
 
   alias HiveTorrent.StatsStorage
   alias HiveTorrent.Tracker
-  alias HiveTorrent.TrackerStorage
+  alias HiveTorrent.TorrentInfoStorage
 
   @default_interval 30 * 60
   @default_error_interval 30
@@ -214,7 +214,7 @@ defmodule HiveTorrent.UDPTracker do
 
     with {:ok, peers} <- Tracker.parse_peers(address_list),
          tracker_data <-
-           TrackerStorage.put(%Tracker{
+           TorrentInfoStorage.put(%Tracker{
              info_hash: tracker_params.info_hash,
              tracker_url: tracker_params.tracker_url,
              complete: seeders,
